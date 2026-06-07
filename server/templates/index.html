@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BikeAssist</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+<style>
+:root {
+    --bg:       #080d17;
+    --surface:  #0f1929;
+    --card:     #162236;
+    --border:   #1e3a5f;
+    --accent:   #3b82f6;
+    --accent2:  #0ea5e9;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --green:    #22c55e;
+    --orange:   #f59e0b;
+    --red:      #ef4444;
+    --nav-w:    64px;
+    --mono:     'Courier New', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* ── Sidebar ── */
+nav {
+    width: var(--nav-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 0;
+    gap: 4px;
+    flex-shrink: 0;
+    z-index: 100;
+}
+
+.logo {
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 12px;
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.85rem;
+    letter-spacing: -0.5px;
+}
+
+.nav-item {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--muted);
+    transition: background 0.15s, color 0.15s;
+    border: none; background: transparent;
+    position: relative;
+}
+.nav-item:hover { background: var(--card); color: var(--text); }
+.nav-item.active { background: var(--accent); color: #fff; }
+
+.nav-item svg { width: 20px; height: 20px; }
+
+.nav-tooltip {
+    position: absolute;
+    left: calc(var(--nav-w) - 4px);
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 200;
+}
+.nav-item:hover .nav-tooltip { opacity: 1; }
+
+.nav-spacer { flex: 1; }
+
+.live-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-top: 8px;
+}
+.live-dot.offline { background: var(--red); animation: none; }
+.live-dot.online  { animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── Main content ── */
+main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── Topbar ── */
+.topbar {
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 12px;
+    flex-shrink: 0;
+}
+.topbar-title { font-weight: 600; font-size: 0.95rem; }
+.topbar-sub   { font-size: 0.78rem; color: var(--muted); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.timestamp    { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); }
+
+/* ── Pages ── */
+.page { display: none; flex: 1; overflow: hidden; }
+.page.active { display: flex; flex-direction: column; }
+
+/* ── Dashboard layout ── */
+.dash-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+/* Stat row */
+.stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+.stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.stat-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; }
+.stat-value { font-size: 1.5rem; font-weight: 700; font-family: var(--mono); color: var(--text); line-height: 1; }
+.stat-unit  { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+
+/* Mid row */
+.mid-row {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 14px;
+    min-height: 0;
+    flex: 1;
+}
+
+#map {
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    min-height: 300px;
+    overflow: hidden;
+}
+
+.side-panels {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* Cards */
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+}
+.card-title {
+    font-size: 0.67rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+.row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid #ffffff06;
+    gap: 12px;
+}
+.row:last-child { border-bottom: none; }
+.row-label { font-size: 0.8rem; color: var(--muted); }
+.row-val   { font-size: 0.85rem; font-weight: 600; font-family: var(--mono); color: var(--text); }
+
+/* Angle bar */
+.angle-wrap { display: flex; align-items: center; gap: 8px; }
+.angle-bar  {
+    flex: 1; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+}
+.angle-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: left .2s, width .2s;
+}
+.angle-bar::after { /* centre line */
+    content: '';
+    position: absolute;
+    left: 50%; top: 0; bottom: 0;
+    width: 1px;
+    background: var(--muted);
+    opacity: .4;
+}
+
+/* Badge */
+.badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    font-family: var(--mono);
+}
+.b-normal    { background: #14532d55; color: #4ade80; border: 1px solid #166534; }
+.b-brake     { background: #78350f55; color: #fbbf24; border: 1px solid #92400e; }
+.b-collision { background: #7f1d1d55; color: #f87171; border: 1px solid #991b1b; }
+
+/* Table */
+.table-wrap {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.table-head {
+    padding: 10px 16px;
+    font-size: 0.67rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    font-weight: 700;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+th {
+    padding: 8px 12px;
+    text-align: left;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.68rem;
+    background: var(--surface);
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+}
+td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #ffffff05;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    color: #cbd5e1;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #ffffff04; }
+.empty td { text-align: center; color: var(--muted); padding: 24px; font-family: inherit; font-size: 0.8rem; }
+
+/* ── Camera page ── */
+.cam-page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.cam-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    flex-shrink: 0;
+}
+.cam-toolbar label { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.cam-toolbar input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 10px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    outline: none;
+    min-width: 0;
+}
+.cam-toolbar input:focus { border-color: var(--accent); }
+.btn {
+    padding: 6px 16px;
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity .15s;
+}
+.btn:hover { opacity: .85; }
+.btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+}
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); opacity: 1; }
+
+.cam-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-left: auto;
+}
+.cam-status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+}
+.cam-status-dot.connected { background: var(--green); animation: pulse 2s infinite; }
+
+.cam-stream-area {
+    flex: 1;
+    background: #000;
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.cam-stream-area img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    display: none;
+}
+
+.cam-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    color: var(--muted);
+    text-align: center;
+    padding: 20px;
+}
+.cam-placeholder svg { opacity: .25; }
+.cam-placeholder h3 { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+.cam-placeholder p  { font-size: 0.78rem; line-height: 1.5; max-width: 280px; }
+
+.cam-bottom {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: 260px;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+}
+
+.cam-panel {
+    position: relative;
+    overflow: hidden;
+    background: var(--card);
+}
+.cam-panel + .cam-panel { border-left: 1px solid var(--border); }
+
+.cam-panel-title {
+    position: absolute;
+    top: 10px; left: 14px;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    font-weight: 700;
+    z-index: 2;
+}
+
+#imuCanvas, #speedCanvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+@media (max-width: 900px) {
+    .stat-row   { grid-template-columns: 1fr 1fr; }
+    .mid-row    { grid-template-columns: 1fr; }
+    .cam-bottom { grid-template-columns: 1fr; height: auto; }
+    .cam-panel  { height: 250px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<nav>
+    <div class="logo">BA</div>
+
+    <button class="nav-item active" id="nav-dash" onclick="showPage('dash')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        <span class="nav-tooltip">儀表板</span>
+    </button>
+
+    <button class="nav-item" id="nav-cam" onclick="showPage('cam')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        </svg>
+        <span class="nav-tooltip">鏡頭串流</span>
+    </button>
+
+    <div class="nav-spacer"></div>
+    <div class="live-dot online" id="liveDot"></div>
+</nav>
+
+<!-- ── Main ── -->
+<main>
+    <!-- Topbar -->
+    <div class="topbar">
+        <span class="topbar-title" id="pageTitle">儀表板</span>
+        <span class="topbar-sub" id="pageSub">即時感測器資料</span>
+        <div class="topbar-right">
+            <span class="timestamp" id="timestamp">--:--:--</span>
+        </div>
+    </div>
+
+    <!-- ── Dashboard Page ── -->
+    <div class="page active" id="page-dash">
+        <div class="dash-scroll">
+
+            <!-- Stat chips -->
+            <div class="stat-row">
+                <div class="stat">
+                    <span class="stat-label">速度</span>
+                    <span class="stat-value" id="s-speed">--</span>
+                    <span class="stat-unit">km/h</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Roll</span>
+                    <span class="stat-value" id="s-roll">--</span>
+                    <span class="stat-unit">度</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Pitch</span>
+                    <span class="stat-value" id="s-pitch">--</span>
+                    <span class="stat-unit">度</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">加速度事件</span>
+                    <span id="s-event" class="badge b-normal" style="font-size:1rem;padding:4px 10px;margin-top:4px">--</span>
+                    <span class="stat-unit" id="s-accel-mag">--G</span>
+                </div>
+            </div>
+
+            <!-- Mid: Map + Panels -->
+            <div class="mid-row">
+                <div id="map"></div>
+
+                <div class="side-panels">
+                    <!-- IMU -->
+                    <div class="card">
+                        <div class="card-title">IMU（MPU-6050）</div>
+                        <div class="row">
+                            <span class="row-label">Roll</span>
+                            <div class="angle-wrap" style="flex:1;margin-left:12px">
+                                <div class="angle-bar" style="flex:1">
+                                    <div class="angle-fill" id="rollFill"></div>
+                                </div>
+                                <span class="row-val" id="v-roll" style="min-width:52px;text-align:right">--°</span>
+                            </div>
+                        </div>
+                        <div class="row" style="margin-top:6px">
+                            <span class="row-label">Pitch</span>
+                            <div class="angle-wrap" style="flex:1;margin-left:12px">
+                                <div class="angle-bar" style="flex:1">
+                                    <div class="angle-fill" id="pitchFill"></div>
+                                </div>
+                                <span class="row-val" id="v-pitch" style="min-width:52px;text-align:right">--°</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Gyro -->
+                    <div class="card">
+                        <div class="card-title">陀螺儀偏移量</div>
+                        <div class="row"><span class="row-label">gX</span><span class="row-val" id="v-gx">-- °/s</span></div>
+                        <div class="row"><span class="row-label">gY</span><span class="row-val" id="v-gy">-- °/s</span></div>
+                        <div class="row"><span class="row-label">gZ</span><span class="row-val" id="v-gz">-- °/s</span></div>
+                        <div class="row"><span class="row-label">合成</span><span class="row-val" id="v-gmag">-- °/s</span></div>
+                    </div>
+
+                    <!-- Accel -->
+                    <div class="card">
+                        <div class="card-title">加速度</div>
+                        <div class="row"><span class="row-label">X</span><span class="row-val" id="v-ax">-- G</span></div>
+                        <div class="row"><span class="row-label">Y</span><span class="row-val" id="v-ay">-- G</span></div>
+                        <div class="row"><span class="row-label">Z</span><span class="row-val" id="v-az">-- G</span></div>
+                    </div>
+
+                    <!-- GPS -->
+                    <div class="card">
+                        <div class="card-title">GPS</div>
+                        <div class="row"><span class="row-label">緯度</span><span class="row-val" id="v-lat">--</span></div>
+                        <div class="row"><span class="row-label">經度</span><span class="row-val" id="v-lon">--</span></div>
+                        <div class="row"><span class="row-label">海拔</span><span class="row-val" id="v-alt">-- m</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="table-wrap">
+                <div class="table-head">最近 20 筆紀錄</div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>時間</th>
+                                <th>Roll °</th>
+                                <th>Pitch °</th>
+                                <th>gX °/s</th>
+                                <th>gY °/s</th>
+                                <th>gZ °/s</th>
+                                <th>速度 km/h</th>
+                                <th>事件</th>
+                                <th>緯度</th>
+                                <th>經度</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody">
+                            <tr class="empty"><td colspan="10">等待資料...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ── Camera Page ── -->
+    <div class="page" id="page-cam">
+        <div class="cam-page">
+
+            <!-- Toolbar -->
+            <div class="cam-toolbar">
+                <label>ESP32 IP</label>
+                <input type="text" id="camIp" placeholder="192.168.137.x" value=""/>
+                <button class="btn" onclick="connectCam()">連線</button>
+                <button class="btn btn-ghost" onclick="disconnectCam()">中斷</button>
+                <div class="cam-status">
+                    <div class="cam-status-dot" id="camDot"></div>
+                    <span id="camStatusText">未連線</span>
+                </div>
+            </div>
+
+            <!-- Stream area -->
+            <div class="cam-stream-area" id="camArea">
+                <div class="cam-placeholder" id="camPlaceholder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" style="width:52px;height:52px">
+                        <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                    <h3>OV2640 鏡頭未連線</h3>
+                    <p>輸入 ESP32 的 IP 位址後點擊「連線」<br>（需先在 ESP32 韌體啟用鏡頭串流功能）</p>
+                </div>
+                <img id="camStream" alt="Camera stream"/>
+            </div>
+
+            <!-- Bottom: 3D IMU model + speedometer -->
+            <div class="cam-bottom">
+                <div class="cam-panel" id="imuPanel">
+                    <span class="cam-panel-title">3D 姿態模型（IMU）</span>
+                    <canvas id="imuCanvas"></canvas>
+                </div>
+                <div class="cam-panel">
+                    <span class="cam-panel-title">即時速度</span>
+                    <canvas id="speedCanvas"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</main>
+
+<script>
+// ── Navigation ────────────────────────────────
+const pages = { dash: 'page-dash', cam: 'page-cam' };
+const titles = { dash: ['儀表板', '即時感測器資料'], cam: ['鏡頭串流', 'OV2640 MJPEG'] };
+
+function showPage(id) {
+    Object.keys(pages).forEach(k => {
+        document.getElementById(pages[k]).classList.toggle('active', k === id);
+        document.getElementById('nav-' + k).classList.toggle('active', k === id);
+    });
+    document.getElementById('pageTitle').textContent = titles[id][0];
+    document.getElementById('pageSub').textContent   = titles[id][1];
+    if (id === 'cam') setTimeout(() => { initIMU3D(); drawSpeedometer(null); }, 60);
+}
+
+// ── Map ───────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView([25.033964, 121.564468], 15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap'
+}).addTo(map);
+
+const pinIcon = L.divIcon({
+    html: `<div style="width:12px;height:12px;background:#3b82f6;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 3px #3b82f640"></div>`,
+    className: '', iconAnchor: [6, 6]
+});
+let marker = null, mapCentred = false;
+
+// ── Helpers ───────────────────────────────────
+function badgeClass(e) {
+    if (e === 'COLLISION') return 'b-collision';
+    if (e === 'BRAKE')     return 'b-brake';
+    return 'b-normal';
+}
+
+function angleBar(fillId, deg, range = 45) {
+    const c = Math.max(-range, Math.min(range, deg));
+    const pct = Math.abs(c) / range * 50;
+    const el = document.getElementById(fillId);
+    el.style.left  = c >= 0 ? '50%'          : (50 - pct) + '%';
+    el.style.width = pct + '%';
+}
+
+function fmt(v, d = 2)   { return v != null ? (+v).toFixed(d) : '--'; }
+function fmtGps(v, d = 6){ return (v && Math.abs(+v) > 0.001) ? (+v).toFixed(d) : '--'; }
+
+// ── Update UI ─────────────────────────────────
+function updateUI(data) {
+    if (!data.length) return;
+    const r = data[0];
+
+    // Topbar timestamp
+    document.getElementById('timestamp').textContent = r.timestamp ?? '--';
+
+    // Stat chips
+    document.getElementById('s-speed').textContent = fmt(r.speed, 1);
+    document.getElementById('s-roll').textContent  = fmt(r.roll, 1);
+    document.getElementById('s-pitch').textContent = fmt(r.pitch, 1);
+    document.getElementById('s-accel-mag').textContent = fmt(
+        Math.sqrt((r.accel_x**2) + (r.accel_y**2) + (r.accel_z**2)), 2) + 'G';
+    const ev = document.getElementById('s-event');
+    ev.textContent = r.accel_event; ev.className = 'badge ' + badgeClass(r.accel_event);
+
+    // Map
+    const hasPos = r.lat && r.lon && (Math.abs(r.lat) + Math.abs(r.lon) > 0.001);
+    if (hasPos) {
+        const pos = [+r.lat, +r.lon];
+        if (!marker) { marker = L.marker(pos, { icon: pinIcon }).addTo(map); }
+        else          { marker.setLatLng(pos); }
+        if (!mapCentred) { map.setView(pos, 16); mapCentred = true; }
+    }
+
+    // IMU
+    document.getElementById('v-roll').textContent  = fmt(r.roll) + '°';
+    document.getElementById('v-pitch').textContent = fmt(r.pitch) + '°';
+    angleBar('rollFill',  r.roll);
+    angleBar('pitchFill', r.pitch);
+
+    // Gyro
+    const gx = r.gx ?? 0, gy = r.gy ?? 0, gz = r.gz ?? 0;
+    document.getElementById('v-gx').textContent   = fmt(gx) + ' °/s';
+    document.getElementById('v-gy').textContent   = fmt(gy) + ' °/s';
+    document.getElementById('v-gz').textContent   = fmt(gz) + ' °/s';
+    document.getElementById('v-gmag').textContent = fmt(Math.sqrt(gx**2+gy**2+gz**2)) + ' °/s';
+
+    // Accel
+    document.getElementById('v-ax').textContent = fmt(r.accel_x, 3) + ' G';
+    document.getElementById('v-ay').textContent = fmt(r.accel_y, 3) + ' G';
+    document.getElementById('v-az').textContent = fmt(r.accel_z, 3) + ' G';
+
+    // GPS
+    document.getElementById('v-lat').textContent = fmtGps(r.lat);
+    document.getElementById('v-lon').textContent = fmtGps(r.lon);
+    document.getElementById('v-alt').textContent = r.alt != null ? fmt(r.alt, 1) + ' m' : '--';
+
+    // 3D IMU target + speedometer
+    targetRoll  = r.roll  || 0;
+    targetPitch = r.pitch || 0;
+    drawSpeedometer(r.speed);
+
+    // Table
+    document.getElementById('tbody').innerHTML = data.map(row => `
+        <tr>
+            <td>${row.timestamp ?? '--'}</td>
+            <td>${fmt(row.roll)}</td>
+            <td>${fmt(row.pitch)}</td>
+            <td>${fmt(row.gx)}</td>
+            <td>${fmt(row.gy)}</td>
+            <td>${fmt(row.gz)}</td>
+            <td>${fmt(row.speed, 1)}</td>
+            <td><span class="badge ${badgeClass(row.accel_event)}">${row.accel_event}</span></td>
+            <td>${fmtGps(row.lat)}</td>
+            <td>${fmtGps(row.lon)}</td>
+        </tr>
+    `).join('');
+}
+
+// ── Camera ────────────────────────────────────
+function connectCam() {
+    const ip = document.getElementById('camIp').value.trim();
+    if (!ip) return;
+    const img = document.getElementById('camStream');
+    img.src = `http://${ip}/stream`;
+    img.style.display = 'block';
+    document.getElementById('camPlaceholder').style.display = 'none';
+    document.getElementById('camDot').className = 'cam-status-dot connected';
+    document.getElementById('camStatusText').textContent = '連線中 — ' + ip;
+    img.onerror = () => {
+        disconnectCam();
+        document.getElementById('camStatusText').textContent = '連線失敗';
+    };
+}
+
+function disconnectCam() {
+    const img = document.getElementById('camStream');
+    img.src = ''; img.style.display = 'none';
+    document.getElementById('camPlaceholder').style.display = 'flex';
+    document.getElementById('camDot').className = 'cam-status-dot';
+    document.getElementById('camStatusText').textContent = '未連線';
+}
+
+// ── 3D IMU Model (Three.js) ───────────────────
+let threeScene, threeCamera, threeRenderer, bikeMesh;
+let imuInitialized = false;
+let targetRoll = 0, targetPitch = 0;
+let curRoll = 0, curPitch = 0;
+
+function initIMU3D() {
+    if (imuInitialized || typeof THREE === 'undefined') return;
+    const panel  = document.getElementById('imuPanel');
+    const canvas = document.getElementById('imuCanvas');
+    if (!panel || !canvas) return;
+    const W = panel.clientWidth;
+    const H = panel.clientHeight;
+    if (W === 0 || H === 0) { setTimeout(initIMU3D, 100); return; }
+
+    threeScene = new THREE.Scene();
+    threeScene.background = new THREE.Color(0x162236);
+
+    threeCamera = new THREE.PerspectiveCamera(45, W / H, 0.1, 100);
+    threeCamera.position.set(0, 2.5, 6);
+    threeCamera.lookAt(0, 0, 0);
+
+    threeRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    threeRenderer.setSize(W, H, false); // false = don't overwrite canvas CSS style
+
+    threeScene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+    dir.position.set(5, 8, 5);
+    threeScene.add(dir);
+
+    const board = new THREE.Mesh(
+        new THREE.BoxGeometry(3.6, 0.15, 2.0),
+        new THREE.MeshPhongMaterial({ color: 0x3b82f6 })
+    );
+    const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(0.18, 0.6, 8),
+        new THREE.MeshPhongMaterial({ color: 0x22c55e })
+    );
+    cone.rotation.z = -Math.PI / 2;
+    cone.position.set(2.0, 0.2, 0);
+
+    bikeMesh = new THREE.Group();
+    bikeMesh.add(board);
+    bikeMesh.add(cone);
+    threeScene.add(bikeMesh);
+
+    const grid = new THREE.GridHelper(8, 8, 0x1e3a5f, 0x1e3a5f);
+    grid.position.y = -0.5;
+    threeScene.add(grid);
+
+    imuInitialized = true;
+    animateIMU();
+}
+
+function animateIMU() {
+    if (!imuInitialized) return;
+    requestAnimationFrame(animateIMU);
+    curRoll  += (targetRoll  - curRoll)  * 0.08;
+    curPitch += (targetPitch - curPitch) * 0.08;
+    bikeMesh.rotation.z = curRoll  * Math.PI / 180;
+    bikeMesh.rotation.x = -curPitch * Math.PI / 180;
+    threeRenderer.render(threeScene, threeCamera);
+}
+
+window.addEventListener('resize', () => {
+    if (!imuInitialized) return;
+    const panel = document.getElementById('imuPanel');
+    const W = panel.clientWidth, H = panel.clientHeight;
+    if (W > 0 && H > 0) {
+        threeCamera.aspect = W / H;
+        threeCamera.updateProjectionMatrix();
+        threeRenderer.setSize(W, H, false);
+    }
+});
+
+// ── Speedometer (Canvas 2D) ───────────────────
+function drawSpeedometer(speed) {
+    const canvas = document.getElementById('speedCanvas');
+    if (!canvas) return;
+    const W = canvas.offsetWidth || 260;
+    const H = canvas.offsetHeight || 230;
+    if (canvas.width !== W || canvas.height !== H) {
+        canvas.width = W; canvas.height = H;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
+    const cx = W / 2, cy = H / 2 + 8;
+    const r  = Math.min(W, H) * 0.40;
+    const DEG = Math.PI / 180;
+    const startA = 135 * DEG;
+    const s = Math.min(60, Math.max(0, speed || 0));
+    const curA = (135 + (s / 60) * 270) * DEG;
+
+    // Background arc (270° sweep CW from 135° to 45°)
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, startA, 45 * DEG, false);
+    ctx.strokeStyle = '#1e3a5f';
+    ctx.lineWidth = 14; ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Active arc coloured by speed zone
+    if (s > 0.05) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, startA, curA, false);
+        ctx.strokeStyle = s < 20 ? '#22c55e' : s < 40 ? '#f59e0b' : '#ef4444';
+        ctx.lineWidth = 14; ctx.lineCap = 'round';
+        ctx.stroke();
+    }
+
+    // Tick marks + labels at 0, 15, 30, 45, 60 km/h
+    [0, 15, 30, 45, 60].forEach(v => {
+        const a = (135 + (v / 60) * 270) * DEG;
+        const c = Math.cos(a), ss = Math.sin(a);
+        ctx.beginPath();
+        ctx.moveTo(cx + (r + 5) * c, cy + (r + 5) * ss);
+        ctx.lineTo(cx + (r - 6) * c, cy + (r - 6) * ss);
+        ctx.strokeStyle = '#334155'; ctx.lineWidth = 2; ctx.lineCap = 'butt';
+        ctx.stroke();
+        ctx.fillStyle = '#64748b';
+        ctx.font = `${Math.round(r * 0.14)}px "Segoe UI", sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(v, cx + (r + 20) * c, cy + (r + 20) * ss);
+    });
+
+    // Needle
+    ctx.beginPath();
+    ctx.moveTo(cx + 7 * Math.cos(curA + Math.PI), cy + 7 * Math.sin(curA + Math.PI));
+    ctx.lineTo(cx + (r - 18) * Math.cos(curA),   cy + (r - 18) * Math.sin(curA));
+    ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Center hub
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#e2e8f0'; ctx.fill();
+
+    // Speed value
+    const dispSpeed = speed != null ? (+speed).toFixed(1) : '--';
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = `bold ${Math.round(r * 0.42)}px "Courier New", monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(dispSpeed, cx, cy + r * 0.40);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = `${Math.round(r * 0.15)}px "Segoe UI", sans-serif`;
+    ctx.fillText('km/h', cx, cy + r * 0.62);
+}
+
+// ── Polling ───────────────────────────────────
+const dot = document.getElementById('liveDot');
+
+async function poll() {
+    try {
+        const res = await fetch('/api/data?limit=20');
+        if (!res.ok) throw new Error();
+        updateUI(await res.json());
+        dot.className = 'live-dot online';
+    } catch {
+        dot.className = 'live-dot offline';
+    }
+}
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

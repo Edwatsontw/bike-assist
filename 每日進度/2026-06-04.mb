@@ -1,0 +1,46 @@
+**一、腳位重新規劃（解決 Camera 衝突）**
+
+Camera DVP 固定佔用 GPIO 4–18，把 IMU / Audio / GPS 全部搬開：
+
+| 模組 | 舊腳位 | 新腳位 |
+|------|--------|--------|
+| IMU SDA/SCL/INT | 8 / 9 / 7 | **1 / 2 / 3** |
+| Audio BCLK/LRCK/DATA | 4 / 5 / 6 | **38 / 39 / 40** |
+| GPS RX/TX | 18 / 17 | **41 / 42** |
+
+修改檔案：`main.cpp`、`Audio.h`、`Camera.h`（衝突警告更新）
+
+---
+
+**二、燈光改版**
+
+移除舊光源，改為紅色 LED × 2（GPIO 43/44，3.3V + 220Ω）+ 5V 常亮光源（直接接電源，不佔 GPIO）。GPIO 45/46 維持空閒。
+
+---
+
+**三、IndicatorModule 功能擴充**
+
+新增 `TurnDirection::HAZARD` 雙閃警示燈模式：
+- `activateHazard()` — 啟動，roll 偵測暫停
+- `isHazard()` — 狀態查詢
+- `justBlinkedOn()` — 一次性旗標，LED 切亮時觸發，供音效同步用
+- `off()` — 退出所有模式
+
+---
+
+**四、聲光同步**
+
+每次 LED 閃亮 → 同 loop 觸發音效：
+- 方向燈：1000 Hz / 70 ms
+- 警示燈：600 Hz / 120 ms
+
+---
+
+**五、自動警示燈觸發**
+
+| 方案 | 條件 | 行為 |
+|------|------|------|
+| A — 碰撞 | AccelEvent::COLLISION (>3G) | 啟動警示燈，**永久**，需手動解除 |
+| E — 急煞低速 | AccelEvent::BRAKE (>2G) + GPS 速度 <5 km/h | 啟動警示燈，速度 >15 km/h 且加速正常後**自動解除** |
+
+兩種觸發用 `hazardPermanent` 旗標區分，避免高速碰撞時誤自動解除。

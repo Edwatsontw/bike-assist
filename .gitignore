@@ -1,0 +1,58 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# Build output
+build/
+dist/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python (server)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+.eggs/
+.env
+.venv
+env/
+venv/
+ENV/
+*.pyc
+
+# Environment variables / secrets
+.env
+.env.*
+secrets.h
+credentials.h
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Node (if any)
+node_modules/
+
+# Docker volumes / data
+server/data/*.db
