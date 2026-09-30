@@ -1,6 +1,6 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show min;
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -105,7 +105,7 @@ class DeviceDiscovery {
     ];
     for (var start = 0; start < hosts.length; start += sweepConcurrency) {
       if (_cancelled) return null;
-      final end = (start + sweepConcurrency).clamp(0, hosts.length);
+      final end = min(start + sweepConcurrency, hosts.length);
       final batch = hosts.sublist(start, end);
       final results = await Future.wait(
         batch.map((h) async => await probe(h, sweepTimeout) ? h : null),
