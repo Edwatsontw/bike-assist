@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/bike_data.dart';
+import '../models/ride_event.dart';
 import '../models/route_point.dart';
 import 'bike_data_service.dart';
 import 'camera_source.dart';
@@ -43,6 +44,10 @@ class RideRecorder {
 
   int? _currentRideId;
   StreamSubscription? _dataSubscription;
+
+  /// Previous sample's accel event, so one brake/collision that stays visible
+  /// across consecutive polls is stored once (on its rising edge).
+  String? _lastAccelEvent;
   StreamSubscription<Uint8List>? _frameSubscription;
 
   /// True while a frame write is in flight — incoming frames are dropped
@@ -60,10 +65,12 @@ class RideRecorder {
     final rideId = await repository.startRide();
     _currentRideId = rideId;
     _lastFrameAt = null;
+    _lastAccelEvent = null;
 
     _dataSubscription = dataService.stream.listen((data) {
       final id = _currentRideId;
       if (id == null) return;
+      _recordEventEdge(id, data);
       // Skip samples without a GPS fix — a device with no fix reports (0,0),
       // which would otherwise fill the ride with bogus points off West Africa.
       if (!_hasGpsFix(data)) return;
@@ -82,6 +89,25 @@ class RideRecorder {
     _indexFlushTimer = Timer.periodic(indexFlushInterval, (_) => _flushFrameIndex());
 
     isRecording.value = true;
+  }
+
+  void _recordEventEdge(int rideId, BikeData data) {
+    final event = data.accelEvent;
+    final previous = _lastAccelEvent;
+    _lastAccelEvent = event;
+    if (event != RideEvent.brake && event != RideEvent.collision) return;
+    if (event == previous) return; // same event still showing — already stored
+    final fix = _hasGpsFix(data);
+    repository.addEvent(
+      rideId,
+      RideEvent(
+        type: event!,
+        timestamp: data.timestamp,
+        lat: fix ? data.lat : null,
+        lng: fix ? data.lng : null,
+        magnitude: data.accelMagnitude,
+      ),
+    );
   }
 
   /// Whether a telemetry sample carries a usable GPS position. The firmware

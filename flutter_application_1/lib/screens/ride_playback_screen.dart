@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../models/ride_event.dart';
 import '../models/route_point.dart';
 import '../services/ride_frame_store.dart';
 import '../services/ride_repository.dart';
+import '../theme.dart';
 import '../utils/timeline.dart';
 
 /// Replays one recorded ride against a real timeline: the camera footage
@@ -52,6 +54,7 @@ class _RidePlaybackScreenState extends State<RidePlaybackScreen> {
   List<DateTime> _pointTimes = const []; // precomputed; searched every tick
   List<DateTime> _frameTimes = const [];
   List<File> _frameFiles = const [];
+  List<RideEvent> _events = const []; // brake/collision, for map markers
 
   bool get _hasGps => _routePoints.isNotEmpty;
 
@@ -74,6 +77,7 @@ class _RidePlaybackScreenState extends State<RidePlaybackScreen> {
   Future<void> _load() async {
     final points = await widget.repository.loadPoints(widget.rideId);
     final frameTimes = await widget.repository.loadFrameTimestamps(widget.rideId);
+    final events = await widget.repository.loadEvents(widget.rideId);
     final files = <File>[];
     for (final time in frameTimes) {
       files.add(await widget.frameStore.frameFile(widget.rideId, time));
@@ -99,6 +103,7 @@ class _RidePlaybackScreenState extends State<RidePlaybackScreen> {
       _pointTimes = points.map((p) => p.timestamp).toList(growable: false);
       _frameTimes = frameTimes;
       _frameFiles = files;
+      _events = events;
       _startTime = times.isEmpty ? null : times.first;
       _total = times.isEmpty ? Duration.zero : times.last.difference(times.first);
     });
@@ -322,7 +327,7 @@ class _RidePlaybackScreenState extends State<RidePlaybackScreen> {
         children: [
           TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.bike_assist',
+            userAgentPackageName: 'com.example.flutter_application_1',
           ),
           PolylineLayer(
             polylines: [
@@ -343,6 +348,28 @@ class _RidePlaybackScreenState extends State<RidePlaybackScreen> {
           ),
           MarkerLayer(
             markers: [
+              for (final event in _events)
+                if (event.hasPosition)
+                  Marker(
+                    point: LatLng(event.lat!, event.lng!),
+                    width: 26,
+                    height: 26,
+                    child: Tooltip(
+                      message: event.label,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: event.isCollision ? SwColors.red : SwColors.amber,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: Icon(
+                          event.isCollision ? Icons.car_crash : Icons.warning_rounded,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
               Marker(
                 point: LatLng(points[index].lat, points[index].lng),
                 width: 32,
@@ -402,6 +429,11 @@ class _RidePlaybackScreenState extends State<RidePlaybackScreen> {
                 Text('${points[index].speedKmh.toStringAsFixed(1)} km/h'),
               ],
               const Spacer(),
+              if (_events.isNotEmpty) ...[
+                Text('事件 ${_events.length}',
+                    style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(width: 12),
+              ],
               if (_frameFiles.isNotEmpty)
                 Text('${_frameFiles.length} 影格',
                     style: Theme.of(context).textTheme.bodySmall),

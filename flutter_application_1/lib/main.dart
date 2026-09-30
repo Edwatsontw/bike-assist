@@ -10,6 +10,7 @@ import 'services/recording_keep_alive.dart';
 import 'services/ride_frame_store.dart';
 import 'services/ride_recorder.dart';
 import 'services/ride_repository.dart';
+import 'theme.dart';
 
 void main() {
   runApp(const BikeAssistApp());
@@ -22,6 +23,7 @@ class BikeAssistApp extends StatefulWidget {
     this.frameStore,
     this.keepAlive,
     this.recordingEnabled = true,
+    this.autoDiscover = true,
   });
 
   /// Injectable so tests can supply an in-memory database / temp directory.
@@ -38,6 +40,10 @@ class BikeAssistApp extends StatefulWidget {
   /// under the widget-test fake-async clock and would leave operations queued
   /// on the sqflite isolate.
   final bool recordingEnabled;
+
+  /// Search the network for the device on launch. Tests turn this off: the
+  /// sweep does real socket I/O that never settles under fake-async.
+  final bool autoDiscover;
 
   @override
   State<BikeAssistApp> createState() => _BikeAssistAppState();
@@ -148,11 +154,10 @@ class _BikeAssistAppState extends State<BikeAssistApp> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'bike-assist',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
-      ),
+      title: 'SafeWay',
+      debugShowCheckedModeBanner: false,
+      theme: buildSafeWayTheme(Brightness.light),
+      darkTheme: buildSafeWayTheme(Brightness.dark),
       home: HomeScreen(
         dataSource: _dataSource,
         cameraSource: _cameraSource,
@@ -161,6 +166,7 @@ class _BikeAssistAppState extends State<BikeAssistApp> with WidgetsBindingObserv
         recorder: _recorder,
         emergencyRelay: _emergencyRelay,
         emergencySettings: _emergencySettings,
+        autoDiscover: widget.autoDiscover,
       ),
     );
   }

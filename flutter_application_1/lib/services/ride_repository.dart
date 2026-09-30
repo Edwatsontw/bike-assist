@@ -2,6 +2,7 @@ import 'package:path/path.dart' show join;
 import 'package:sqflite/sqflite.dart';
 
 import '../models/ride.dart';
+import '../models/ride_event.dart';
 import '../models/route_point.dart';
 
 /// Persists recorded rides (and their GPS/speed points) to a local SQLite
@@ -21,7 +22,7 @@ class RideRepository {
     final path = _explicitPath ?? join(await getDatabasesPath(), 'bike_assist_rides.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE rides (
@@ -41,12 +42,17 @@ class RideRepository {
           )
         ''');
         await _createFramesTable(db);
+        await _createEventsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         // v1 → v2 added camera frame recording. Rides recorded before the
         // upgrade simply have no frames, which playback handles.
         if (oldVersion < 2) {
           await _createFramesTable(db);
+        }
+        // v2 → v3 added brake/collision events. Older rides have none.
+        if (oldVersion < 3) {
+          await _createEventsTable(db);
         }
       },
     );
@@ -66,6 +72,74 @@ class RideRepository {
     await db.execute(
       'CREATE INDEX idx_ride_frames_ride_time ON ride_frames (ride_id, timestamp)',
     );
+  }
+
+  /// Brake/collision events detected during a ride. Position is nullable:
+  /// an event without a GPS fix is still worth keeping on the timeline.
+  static Future<void> _createEventsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE ride_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ride_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        lat REAL,
+        lng REAL,
+        magnitude REAL,
+        timestamp TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX idx_ride_events_ride_time ON ride_events (ride_id, timestamp)',
+    );
+  }
+
+  Future<void> addEvent(int rideId, RideEvent event) async {
+    final db = await _database;
+    await db.insert('ride_events', {
+      'ride_id': rideId,
+      'type': event.type,
+      'lat': event.lat,
+      'lng': event.lng,
+      'magnitude': event.magnitude,
+      'timestamp': event.timestamp.toIso8601String(),
+    });
+  }
+
+  Future<List<RideEvent>> loadEvents(int rideId) async {
+    final db = await _database;
+    final rows = await db.query(
+      'ride_events',
+      where: 'ride_id = ?',
+      whereArgs: [rideId],
+      orderBy: 'timestamp ASC',
+    );
+    return rows
+        .map((row) => RideEvent(
+              type: row['type'] as String,
+              timestamp: DateTime.parse(row['timestamp'] as String),
+              lat: (row['lat'] as num?)?.toDouble(),
+              lng: (row['lng'] as num?)?.toDouble(),
+              magnitude: (row['magnitude'] as num?)?.toDouble(),
+            ))
+        .toList();
+  }
+
+  /// Brake/collision totals for every ride that has any, keyed by ride id.
+  Future<Map<int, RideEventCounts>> eventCounts() async {
+    final db = await _database;
+    final rows = await db.rawQuery('''
+      SELECT ride_id,
+             SUM(CASE WHEN type = 'BRAKE' THEN 1 ELSE 0 END) AS brakes,
+             SUM(CASE WHEN type = 'COLLISION' THEN 1 ELSE 0 END) AS collisions
+      FROM ride_events GROUP BY ride_id
+    ''');
+    return {
+      for (final row in rows)
+        row['ride_id'] as int: RideEventCounts(
+          brakes: (row['brakes'] as num?)?.toInt() ?? 0,
+          collisions: (row['collisions'] as num?)?.toInt() ?? 0,
+        ),
+    };
   }
 
   Future<int> startRide({DateTime? at}) async {
@@ -206,12 +280,13 @@ class RideRepository {
     return rows.map((row) => DateTime.parse(row['timestamp'] as String)).toList();
   }
 
-  /// Removes the ride and all of its points and frame index rows. The frame
+  /// Removes the ride and all of its points, events and frame index rows. The frame
   /// image files are deleted separately via [RideFrameStore.deleteRideFrames].
   Future<void> deleteRide(int rideId) async {
     final db = await _database;
     await db.transaction((txn) async {
       await txn.delete('ride_frames', where: 'ride_id = ?', whereArgs: [rideId]);
+      await txn.delete('ride_events', where: 'ride_id = ?', whereArgs: [rideId]);
       await txn.delete('ride_points', where: 'ride_id = ?', whereArgs: [rideId]);
       await txn.delete('rides', where: 'id = ?', whereArgs: [rideId]);
     });

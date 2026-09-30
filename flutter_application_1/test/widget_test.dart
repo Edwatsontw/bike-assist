@@ -6,16 +6,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/models/bike_data.dart';
+import 'package:flutter_application_1/models/ride_event.dart';
 import 'package:flutter_application_1/models/route_point.dart';
 import 'package:flutter_application_1/screens/device_wifi_setup_screen.dart';
 import 'package:flutter_application_1/screens/ride_list_screen.dart';
 import 'package:flutter_application_1/services/bike_data_service.dart';
 import 'package:flutter_application_1/services/camera_source.dart';
 import 'package:flutter_application_1/services/http_status_bike_data_service.dart';
+import 'package:flutter_application_1/services/device_discovery.dart';
 import 'package:flutter_application_1/services/device_provisioning.dart';
 import 'package:flutter_application_1/services/emergency_relay_service.dart';
 import 'package:flutter_application_1/services/recording_keep_alive.dart';
@@ -83,6 +86,9 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   });
 
+  // The home screen reads the last-used device host on startup.
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   /// An app wired to an in-memory database and a temp frame directory, with
   /// background recording off. Recording performs real file + database writes,
   /// which never complete under the widget-test fake-async clock and would
@@ -91,6 +97,7 @@ void main() {
         repository: RideRepository(path: inMemoryDatabasePath),
         frameStore: RideFrameStore(baseDir: Directory.systemTemp),
         recordingEnabled: false,
+        autoDiscover: false,
       );
 
   testWidgets('starts on the no-connection view before a device is connected',
@@ -98,10 +105,11 @@ void main() {
     await tester.pumpWidget(testApp());
     await tester.pump(const Duration(milliseconds: 600));
 
-    expect(find.text('bike-assist'), findsOneWidget);
+    expect(find.text('SafeWay'), findsOneWidget);
     // No mock data any more: the app opens disconnected.
     expect(find.text('尚未連接裝置'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, '連接裝置'), findsOneWidget);
+    expect(find.text('自動搜尋裝置'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '手動輸入 IP'), findsOneWidget);
     // The live dashboard is not shown until connected.
     expect(find.text('傾角'), findsNothing);
 
@@ -449,16 +457,20 @@ void main() {
   });
 
   group('BikeData.fromStatusJson', () {
-    // A representative /api/status payload from the main.cpp firmware.
+    // A representative /api/status payload from the v3 firmware
+    // (statusHandler() in bike-assist-v3/src/main.cpp).
     final status = <String, dynamic>{
       'wifi': 'sta',
       'ip': '192.168.137.34',
-      'imu': {'ok': true, 'roll': 1.2, 'pitch': -0.5, 'ax': 0.01, 'ay': 0.02, 'az': 0.99},
-      'accel': {'event': 'BRAKE', 'magnitude': 2.3},
+      'imu': {'ok': true, 'roll': 1.2, 'pitch': -0.5, 'ax': 0.01, 'ay': 0.02, 'az': 0.99, 'i2cStale': 0},
+      'accel': {'event': 'BRAKE', 'g': 2.3},
       'gps': {'chars': 1234, 'fix': true, 'lat': 23.99, 'lon': 121.60, 'speed': 12.5},
-      'led': {'direction': 'LEFT', 'manual': false},
-      'sd': {'ok': true, 'sizeMB': 60350},
+      'time': {'now': '2026-09-30 11:00:00', 'source': 'gps'},
+      'sd': {'ok': true},
       'camera': true,
+      'night': false,
+      'led': 'left',
+      'hazard': true,
     };
 
     test('maps GPS and speed fields (lon -> lng)', () {
@@ -468,14 +480,35 @@ void main() {
       expect(data.speedKmh, 12.5);
     });
 
-    test('carries the extra firmware fields through', () {
+    test('reads the v3 accel, attitude and device-state fields', () {
       final data = BikeData.fromStatusJson(status);
       expect(data.accelEvent, 'BRAKE');
-      expect(data.accelMagnitude, 2.3);
-      expect(data.ledDirection, 'LEFT');
-      expect(data.ledManual, isFalse);
+      expect(data.isBrake, isTrue);
+      expect(data.accelMagnitude, 2.3); // v3 sends "g"
+      expect(data.imuOk, isTrue);
+      expect(data.roll, 1.2);
+      expect(data.pitch, -0.5);
+      expect(data.hazardLocked, isTrue);
+      expect(data.nightMode, isFalse);
+      expect(data.cameraOk, isTrue);
+      expect(data.sdOk, isTrue);
+      expect(data.wifiMode, 'sta');
+      expect(data.deviceIp, '192.168.137.34');
+      expect(data.timeSource, 'gps');
+      expect(data.ledDirection, 'LEFT'); // v3 "led" is a plain string
       expect(data.gpsFix, isTrue);
       expect(data.gpsChars, 1234);
+    });
+
+    test('still accepts the older accel.magnitude / led object shape', () {
+      final data = BikeData.fromStatusJson(const {
+        'accel': {'event': 'COLLISION', 'magnitude': 3.4},
+        'led': {'direction': 'hazard', 'manual': true},
+      });
+      expect(data.isCollision, isTrue);
+      expect(data.accelMagnitude, 3.4);
+      expect(data.ledDirection, 'HAZARD');
+      expect(data.ledManual, isTrue);
     });
 
     test('missing objects default numbers to 0 and extras to null', () {
@@ -485,6 +518,8 @@ void main() {
       expect(data.accelEvent, isNull);
       expect(data.ledManual, isNull);
       expect(data.gpsFix, isNull);
+      expect(data.roll, isNull);
+      expect(data.hazardLocked, isNull);
     });
   });
 
@@ -694,8 +729,41 @@ void main() {
       expect(alert.rssi, -60);
     });
 
-    test('rejects a wrong event type', () {
-      expect(FallAlert.tryParse(payload(0x02, 1, 2, 3)), isNull);
+    test('decodes the 5-minute emergency escalation (0x02)', () {
+      final alert = FallAlert.tryParse(payload(0x02, 24.0, 121.0, 1752000300));
+      expect(alert, isNotNull);
+      expect(alert!.isEmergency, isTrue);
+      expect(alert.level, 'emergency');
+    });
+
+    test('a 10-second fall (0x01) is a notice', () {
+      final alert = FallAlert.tryParse(payload(0x01, 24.0, 121.0, 1752000000))!;
+      expect(alert.isEmergency, isFalse);
+      expect(alert.level, 'notice');
+    });
+
+    test('notice and emergency for the same fall are relayed separately', () {
+      final notice = FallAlert.tryParse(payload(0x01, 24.0, 121.0, 1752000000))!;
+      final emergency = FallAlert.tryParse(payload(0x02, 24.0, 121.0, 1752000000))!;
+      expect(notice.dedupeKey, isNot(emergency.dedupeKey));
+    });
+
+    test('relay body matches the v3 server FallenReport model', () {
+      final alert = FallAlert.tryParse(payload(0x02, 24.0, 121.0, 1752000300))!;
+      final body = EmergencyRelayService.buildRelayBody(alert);
+      expect(body['lat'], closeTo(24.0, 1e-3));
+      expect(body['lon'], closeTo(121.0, 1e-3));
+      expect(body['device_ts'], 1752000300);
+      expect(body['level'], 'emergency');
+    });
+
+    test('flags a fall broadcast without a GPS fix', () {
+      final alert = FallAlert.tryParse(payload(0x01, 0, 0, 1752000000))!;
+      expect(alert.hasPosition, isFalse);
+    });
+
+    test('rejects an unknown event type', () {
+      expect(FallAlert.tryParse(payload(0x03, 1, 2, 3)), isNull);
     });
 
     test('rejects a too-short payload', () {
@@ -714,6 +782,111 @@ void main() {
     test('is a no-op elsewhere, so tests and desktop never call the plugin', () {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       expect(RecordingKeepAlive.forPlatform(), isA<NoopKeepAlive>());
+    });
+  });
+
+  group('Ride events', () {
+    late RideRepository repository;
+    late _FakeBikeDataService data;
+    late CameraSource cameraSource;
+    late RideRecorder recorder;
+
+    setUp(() {
+      repository = RideRepository(path: inMemoryDatabasePath);
+      data = _FakeBikeDataService();
+      cameraSource = CameraSource();
+      recorder = RideRecorder(
+        dataService: data,
+        repository: repository,
+        cameraSource: cameraSource,
+        frameStore: RideFrameStore(baseDir: Directory.systemTemp),
+      );
+    });
+
+    tearDown(() async {
+      recorder.dispose();
+      cameraSource.dispose();
+      data.dispose();
+      await repository.close();
+    });
+
+    BikeData sample(String event, {bool fix = true}) => BikeData(
+          lat: fix ? 24.0 : 0,
+          lng: fix ? 121.0 : 0,
+          speedKmh: 15,
+          timestamp: DateTime.now(),
+          gpsFix: fix,
+          accelEvent: event,
+          accelMagnitude: 2.6,
+        );
+
+    test('stores each brake/collision once, on its rising edge', () async {
+      await recorder.start();
+      final rideId = (await repository.listRides()).first.id;
+
+      data.emit(sample('NORMAL'));
+      data.emit(sample('BRAKE'));
+      data.emit(sample('BRAKE')); // same brake still showing → not stored again
+      data.emit(sample('NORMAL'));
+      data.emit(sample('COLLISION', fix: false)); // no fix → stored without position
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await recorder.stop();
+
+      final events = await repository.loadEvents(rideId);
+      expect(events.map((e) => e.type), ['BRAKE', 'COLLISION']);
+      expect(events.first.hasPosition, isTrue);
+      expect(events.first.magnitude, 2.6);
+      expect(events.last.hasPosition, isFalse);
+
+      final counts = await repository.eventCounts();
+      expect(counts[rideId]!.brakes, 1);
+      expect(counts[rideId]!.collisions, 1);
+    });
+
+    test('deleteRide removes its events too', () async {
+      final rideId = await repository.startRide();
+      await repository.addEvent(
+        rideId,
+        RideEvent(type: RideEvent.brake, timestamp: DateTime(2026, 1, 1)),
+      );
+      await repository.deleteRide(rideId);
+      expect(await repository.loadEvents(rideId), isEmpty);
+      expect(await repository.eventCounts(), isEmpty);
+    });
+  });
+
+  group('DeviceDiscovery', () {
+    test('privatePrefix24 keeps private ranges only', () {
+      expect(DeviceDiscovery.privatePrefix24('192.168.137.1'), '192.168.137');
+      expect(DeviceDiscovery.privatePrefix24('10.4.2.9'), '10.4.2');
+      expect(DeviceDiscovery.privatePrefix24('172.20.1.5'), '172.20.1');
+      expect(DeviceDiscovery.privatePrefix24('172.32.1.5'), isNull);
+      expect(DeviceDiscovery.privatePrefix24('8.8.8.8'), isNull);
+      expect(DeviceDiscovery.privatePrefix24('nope'), isNull);
+    });
+
+    test('finds the remembered host before trying anything else', () async {
+      final asked = <String>[];
+      final discovery = DeviceDiscovery(
+        client: MockClient((request) async {
+          asked.add(request.url.host);
+          return request.url.host == '192.168.137.50'
+              ? http.Response('{"imu":{"ok":true},"gps":{}}', 200)
+              : http.Response('no', 404);
+        }),
+        listInterfaces: () async => [],
+      );
+      final host = await discovery.find(preferred: '192.168.137.50');
+      expect(host, '192.168.137.50');
+      expect(asked, ['192.168.137.50']);
+    });
+
+    test('ignores web servers that are not the bike', () async {
+      final discovery = DeviceDiscovery(
+        client: MockClient((request) async => http.Response('{"hello":1}', 200)),
+        listInterfaces: () async => [],
+      );
+      expect(await discovery.find(preferred: '192.168.1.1'), isNull);
     });
   });
 }

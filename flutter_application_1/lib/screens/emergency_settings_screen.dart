@@ -126,7 +126,7 @@ class _EmergencySettingsScreenState extends State<EmergencySettingsScreen> {
                   keyboardType: TextInputType.url,
                   decoration: const InputDecoration(
                     labelText: '伺服器網址',
-                    hintText: '例如 https://your-server.com/api/fall',
+                    hintText: '例如 http://192.168.137.1:8000/api/fallen',
                     helperText: '收到緊急廣播時會 POST JSON 到這個網址',
                     border: OutlineInputBorder(),
                   ),
@@ -208,12 +208,16 @@ class _StatusPanel extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(outcome.ok ? '最後一次已回報' : '最後一次回報失敗',
+                        Text(
+                            '${outcome.ok ? '最後一次已回報' : '最後一次回報失敗'}'
+                            '・${a.isEmergency ? '緊急事故(倒地 5 分鐘)' : '一般倒車通知'}',
                             style:
                                 Theme.of(context).textTheme.labelLarge),
                         const SizedBox(height: 4),
-                        Text('座標:${a.lat.toStringAsFixed(6)}, '
-                            '${a.lon.toStringAsFixed(6)}'),
+                        Text(a.hasPosition
+                            ? '座標:${a.lat.toStringAsFixed(6)}, '
+                                '${a.lon.toStringAsFixed(6)}'
+                            : '座標:裝置當時沒有 GPS 定位'),
                         Text('裝置時間:${a.time.toLocal()}'),
                         if (outcome.detail != null) Text('結果:${outcome.detail}'),
                       ],

@@ -14,8 +14,10 @@ import 'keep_alive_controller.dart';
 /// is just the payload below.
 const int _kFallCompanyId = 0xFFFF;
 
-/// First payload byte — event type. Only `FALLEN` is defined (see main.cpp).
-const int _kEvtFallen = 0x01;
+/// First payload byte — event type (see `BLE_EVT_*` in the v3 main.cpp):
+/// 0x01 = fallen for 10 s (notice), 0x02 = still down after 5 min (emergency).
+const int kEvtFallenNotice = 0x01;
+const int kEvtFallenEmergency = 0x02;
 
 /// Payload layout advertised by `broadcastFallenBLE`:
 /// `[evt(1) | lat(float32 LE, 4) | lon(float32 LE, 4) | epoch(uint32 LE, 4)]`.
@@ -28,6 +30,7 @@ class FallAlert {
     required this.lon,
     required this.epoch,
     required this.rssi,
+    this.eventType = kEvtFallenNotice,
   });
 
   final double lat;
@@ -39,6 +42,21 @@ class FallAlert {
   /// Signal strength of the advertisement that carried it (dBm).
   final int rssi;
 
+  /// Raw event byte: [kEvtFallenNotice] or [kEvtFallenEmergency].
+  final int eventType;
+
+  bool get isEmergency => eventType == kEvtFallenEmergency;
+
+  /// The `level` the v3 server's `POST /api/fallen` expects.
+  String get level => isEmergency ? 'emergency' : 'notice';
+
+  /// Whether the device had a GPS fix when it fell (it sends 0,0 otherwise).
+  bool get hasPosition => !(lat == 0 && lon == 0);
+
+  /// Identity of one alert: the same fall is advertised for ~2 minutes, and a
+  /// fall that escalates re-broadcasts under a new event type.
+  String get dedupeKey => '$eventType:$epoch';
+
   DateTime get time => DateTime.fromMillisecondsSinceEpoch(epoch * 1000);
 
   /// Decodes a fall alert from the manufacturer-data [payload] (the bytes after
@@ -47,13 +65,15 @@ class FallAlert {
   /// `[evt(1) | lat(float32 LE) | lon(float32 LE) | epoch(uint32 LE)]`.
   static FallAlert? tryParse(List<int> payload, {int rssi = 0}) {
     if (payload.length < _kFallPayloadLen) return null;
-    if (payload[0] != _kEvtFallen) return null;
+    final evt = payload[0];
+    if (evt != kEvtFallenNotice && evt != kEvtFallenEmergency) return null;
     final bytes = ByteData.sublistView(Uint8List.fromList(payload));
     return FallAlert(
       lat: bytes.getFloat32(1, Endian.little),
       lon: bytes.getFloat32(5, Endian.little),
       epoch: bytes.getUint32(9, Endian.little),
       rssi: rssi,
+      eventType: evt,
     );
   }
 }
@@ -98,9 +118,10 @@ class EmergencyRelayService {
   String _serverUrl = '';
   bool _holdingKeepAlive = false;
 
-  /// Epochs already relayed, so a device advertising the same fall for two
-  /// minutes doesn't POST it dozens of times.
-  final Set<int> _relayedEpochs = <int>{};
+  /// Alerts already relayed (see [FallAlert.dedupeKey]), so a device
+  /// advertising the same fall for two minutes doesn't POST it dozens of times,
+  /// while an escalation from notice to emergency is still reported.
+  final Set<String> _relayed = <String>{};
 
   StreamSubscription<List<ScanResult>>? _scanSub;
 
@@ -201,7 +222,7 @@ class EmergencyRelayService {
   }
 
   Future<void> _relay(FallAlert alert) async {
-    if (_relayedEpochs.contains(alert.epoch)) return; // already sent this fall
+    if (_relayed.contains(alert.dedupeKey)) return; // already sent this alert
     final url = _serverUrl;
     if (url.isEmpty) return;
     final uri = Uri.tryParse(url);
@@ -211,38 +232,46 @@ class EmergencyRelayService {
     }
     // Reserve the epoch before the request so concurrent adverts don't
     // double-post; on failure release it so a later advert can retry.
-    _relayedEpochs.add(alert.epoch);
+    _relayed.add(alert.dedupeKey);
     try {
       final response = await _client
           .post(
             uri,
             headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'event': 'fallen',
-              'lat': alert.lat,
-              'lon': alert.lon,
-              'epoch': alert.epoch,
-              'time': alert.time.toUtc().toIso8601String(),
-            }),
+            body: jsonEncode(buildRelayBody(alert)),
           )
           .timeout(const Duration(seconds: 8));
       if (response.statusCode >= 200 && response.statusCode < 300) {
         _recordOutcome(alert, ok: true, detail: 'HTTP ${response.statusCode}');
       } else {
-        _relayedEpochs.remove(alert.epoch);
+        _relayed.remove(alert.dedupeKey);
         _recordOutcome(alert, ok: false, detail: 'HTTP ${response.statusCode}');
       }
     } catch (error) {
-      _relayedEpochs.remove(alert.epoch);
+      _relayed.remove(alert.dedupeKey);
       _recordOutcome(alert, ok: false, detail: error.toString());
     }
   }
+
+  /// JSON sent to the server. `lat`/`lon`/`device_ts`/`level` match the v3
+  /// server's `FallenReport` model (POST /api/fallen); `event`/`epoch`/`time`
+  /// are kept for any older endpoint that read them.
+  @visibleForTesting
+  static Map<String, dynamic> buildRelayBody(FallAlert alert) => {
+        'lat': alert.lat,
+        'lon': alert.lon,
+        'device_ts': alert.epoch,
+        'level': alert.level,
+        'event': 'fallen',
+        'epoch': alert.epoch,
+        'time': alert.time.toUtc().toIso8601String(),
+      };
 
   void _recordOutcome(FallAlert alert, {required bool ok, String? detail}) {
     lastRelay.value =
         RelayOutcome(alert: alert, at: DateTime.now(), ok: ok, detail: detail);
     debugPrint('[Emergency] relay ${ok ? "OK" : "FAIL"} '
-        'lat=${alert.lat} lon=${alert.lon} epoch=${alert.epoch} $detail');
+        'level=${alert.level} lat=${alert.lat} lon=${alert.lon} epoch=${alert.epoch} $detail');
   }
 
   Future<bool> _ensurePermissions() async {

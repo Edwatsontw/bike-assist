@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/ride.dart';
+import '../models/ride_event.dart';
 import '../services/ride_export_service.dart';
 import '../services/ride_frame_store.dart';
 import '../services/ride_recorder.dart';
@@ -38,6 +39,9 @@ class _RideListScreenState extends State<RideListScreen> {
   /// flashes a red error screen until the async reload lands.
   List<Ride>? _rides;
 
+  /// Brake/collision totals per ride id (rides with none are absent).
+  Map<int, RideEventCounts> _eventCounts = const {};
+
   late final RideExportService _exporter = RideExportService(
     repository: widget.repository,
     frameStore: widget.frameStore,
@@ -57,8 +61,12 @@ class _RideListScreenState extends State<RideListScreen> {
         widget.recorder.isRecording.value ? widget.recorder.currentRideId : null;
     await widget.repository.closeOrphanRides(exceptRideId: activeId);
     final rides = await widget.repository.listRides();
+    final counts = await widget.repository.eventCounts();
     if (!mounted) return;
-    setState(() => _rides = rides);
+    setState(() {
+      _rides = rides;
+      _eventCounts = counts;
+    });
   }
 
   Future<void> _toggleRecording() async {
@@ -241,11 +249,15 @@ class _RideListScreenState extends State<RideListScreen> {
                       final tile = ListTile(
                         leading: Icon(
                           ride.isActive ? Icons.fiber_manual_record : Icons.route,
-                          color: ride.isActive ? Colors.red : null,
+                          color: ride.isActive
+                              ? Theme.of(context).colorScheme.error
+                              : null,
                         ),
                         title: Text(_formatDateTime(ride.startTime)),
                         subtitle: Text(
-                          ride.isActive ? '記錄中' : _formatDuration(ride.duration),
+                          ride.isActive
+                              ? '記錄中'
+                              : _subtitle(ride, _eventCounts[ride.id]),
                         ),
                         // The in-progress ride can't be exported (it has no end
                         // time yet); every finished ride gets a share action.
@@ -304,6 +316,13 @@ class _RideListScreenState extends State<RideListScreen> {
   String _formatDateTime(DateTime time) =>
       '${time.year}/${time.month.toString().padLeft(2, '0')}/${time.day.toString().padLeft(2, '0')} '
       '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+
+  String _subtitle(Ride ride, RideEventCounts? counts) {
+    final parts = <String>[_formatDuration(ride.duration)];
+    if (counts != null && counts.brakes > 0) parts.add('急煞 ${counts.brakes}');
+    if (counts != null && counts.collisions > 0) parts.add('碰撞 ${counts.collisions}');
+    return parts.join(' · ');
+  }
 
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes.remainder(60);

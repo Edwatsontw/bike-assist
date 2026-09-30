@@ -1,30 +1,33 @@
-/// Telemetry snapshot matching the ESP32-S3 JSON payload.
+/// Telemetry snapshot matching the ESP32-S3 v3 firmware's `GET /api/status`.
 ///
-/// The core position/speed fields come from the firmware's `GET /api/status`
-/// endpoint. A handful of extra fields (crash/brake event, indicator state,
-/// GPS diagnostics) are carried through so the app *receives* them; they're
-/// null when the source doesn't provide them.
-///
-/// The IMU/gyroscope motion data (raw accel/gyro, filtered roll/pitch, and the
-/// derived lean angle) is no longer received or displayed — the dashboard only
-/// shows speed and GPS position now.
+/// Firmware payload (see `statusHandler()` in bike-assist-v3/src/main.cpp):
+/// ```json
+/// {"wifi":"sta","ip":"192.168.137.50",
+///  "imu":{"ok":true,"roll":1.2,"pitch":-0.5,"ax":0.01,"ay":0.02,"az":0.99,"i2cStale":0},
+///  "accel":{"event":"BRAKE","g":2.3},
+///  "gps":{"chars":1234,"fix":true,"lat":23.99,"lon":121.60,"speed":12.5},
+///  "time":{"now":"...","source":"gps"},
+///  "sd":{"ok":true},"camera":true,"night":false,
+///  "led":"left","hazard":false}
+/// ```
 class BikeData {
   final double lat;
   final double lng;
   final double speedKmh;
   final DateTime timestamp;
 
-  // ── Extra firmware telemetry (received, not displayed) ──────────────────
   /// Accelerometer event classification: `NORMAL` | `BRAKE` | `COLLISION`.
   final String? accelEvent;
 
-  /// Combined acceleration magnitude, in G.
+  /// Combined acceleration magnitude, in G (firmware field `accel.g`).
   final double? accelMagnitude;
 
-  /// Turn-indicator state: `NONE` | `LEFT` | `RIGHT` | `HAZARD`.
+  /// Current indicator state, upper-cased: `NONE` | `LEFT` | `RIGHT` | `HAZARD`.
+  /// Received for completeness only — the turn signals are driven by the
+  /// physical handlebar switch, so the app neither shows nor controls them.
   final String? ledDirection;
 
-  /// Whether the indicator is under manual (app) control vs. auto lean-based.
+  /// Legacy field from the older firmware's `led` object; null on v3.
   final bool? ledManual;
 
   /// Whether the GPS currently has a valid fix.
@@ -34,6 +37,32 @@ class BikeData {
   /// 0 while connected means no data is reaching the ESP32 (wiring), whereas a
   /// rising count with [gpsFix] false means it's receiving but not yet locked.
   final int? gpsChars;
+
+  // ── Attitude (v3) ───────────────────────────────────────────────────────
+  /// Whether the IMU (MPU6050) is responding.
+  final bool? imuOk;
+
+  /// Roll / pitch in degrees from the firmware's filtered IMU output.
+  final double? roll;
+  final double? pitch;
+
+  // ── Device state (v3) ───────────────────────────────────────────────────
+  /// True when a detected collision has latched the hazard lights on. The
+  /// firmware keeps them on until the app sends `/api/led?mode=off`.
+  final bool? hazardLocked;
+
+  /// Whether the camera's software low-light enhancement is on.
+  final bool? nightMode;
+
+  final bool? cameraOk;
+  final bool? sdOk;
+
+  /// `sta` (joined a WiFi network) or `ap` (serving its setup hotspot).
+  final String? wifiMode;
+  final String? deviceIp;
+
+  /// Where the device clock came from (e.g. `gps`, `ntp`, `none`).
+  final String? timeSource;
 
   const BikeData({
     required this.lat,
@@ -46,14 +75,26 @@ class BikeData {
     this.ledManual,
     this.gpsFix,
     this.gpsChars,
+    this.imuOk,
+    this.roll,
+    this.pitch,
+    this.hazardLocked,
+    this.nightMode,
+    this.cameraOk,
+    this.sdOk,
+    this.wifiMode,
+    this.deviceIp,
+    this.timeSource,
   });
 
-  /// Parses the firmware's `/api/status` JSON (nested `gps` / `accel` / `led`
-  /// objects) into a [BikeData]. Missing numeric fields default to 0; the extra
-  /// fields default to null when absent.
+  bool get isBrake => accelEvent == 'BRAKE';
+  bool get isCollision => accelEvent == 'COLLISION';
+
+  /// Parses the firmware's `/api/status` JSON into a [BikeData]. Missing
+  /// numeric position fields default to 0; everything else defaults to null.
   ///
-  /// Note: GPS longitude arrives as `lon`. The `imu` object (accel/gyro/roll/
-  /// pitch) is intentionally ignored — the app no longer uses motion data.
+  /// Accepts both the v3 shape (`accel.g`, `led` as a string) and the older
+  /// shape (`accel.magnitude`, `led` as `{direction, manual}`).
   factory BikeData.fromStatusJson(Map<String, dynamic> json, {DateTime? timestamp}) {
     Map<String, dynamic> obj(String key) {
       final value = json[key];
@@ -62,22 +103,47 @@ class BikeData {
 
     final gps = obj('gps');
     final accel = obj('accel');
-    final led = obj('led');
+    final imu = obj('imu');
+    final sd = obj('sd');
+    final time = obj('time');
 
     double num0(dynamic v) => (v as num?)?.toDouble() ?? 0.0;
     double? numOrNull(dynamic v) => (v as num?)?.toDouble();
+    bool? boolOrNull(dynamic v) => v is bool ? v : null;
+    String? strOrNull(dynamic v) => v is String ? v : null;
+
+    // `led` is a plain string on v3 ("left"/"LEFT"/"none"...), an object before.
+    final ledRaw = json['led'];
+    String? ledDirection;
+    bool? ledManual;
+    if (ledRaw is String) {
+      ledDirection = ledRaw.toUpperCase();
+    } else if (ledRaw is Map) {
+      ledDirection = strOrNull(ledRaw['direction'])?.toUpperCase();
+      ledManual = boolOrNull(ledRaw['manual']);
+    }
 
     return BikeData(
       lat: num0(gps['lat']),
       lng: num0(gps['lon']),
       speedKmh: num0(gps['speed']),
       timestamp: timestamp ?? DateTime.now(),
-      accelEvent: accel['event'] as String?,
-      accelMagnitude: numOrNull(accel['magnitude']),
-      ledDirection: led['direction'] as String?,
-      ledManual: led['manual'] as bool?,
-      gpsFix: gps['fix'] as bool?,
+      accelEvent: strOrNull(accel['event']),
+      accelMagnitude: numOrNull(accel['g'] ?? accel['magnitude']),
+      ledDirection: ledDirection,
+      ledManual: ledManual,
+      gpsFix: boolOrNull(gps['fix']),
       gpsChars: (gps['chars'] as num?)?.toInt(),
+      imuOk: boolOrNull(imu['ok']),
+      roll: numOrNull(imu['roll']),
+      pitch: numOrNull(imu['pitch']),
+      hazardLocked: boolOrNull(json['hazard']),
+      nightMode: boolOrNull(json['night']),
+      cameraOk: boolOrNull(json['camera']),
+      sdOk: boolOrNull(sd['ok']),
+      wifiMode: strOrNull(json['wifi']),
+      deviceIp: strOrNull(json['ip']),
+      timeSource: strOrNull(time['source']),
     );
   }
 }
