@@ -45,6 +45,7 @@ dependencies:
   flutter_blue_plus: ^1.35.5
   shared_preferences: ^2.3.3
   permission_handler: ^11.3.1
+  geolocator: ^14.0.0
 
 dev_dependencies:
   flutter_test:

@@ -21,6 +21,7 @@ import 'package:flutter_application_1/services/http_status_bike_data_service.dar
 import 'package:flutter_application_1/services/device_discovery.dart';
 import 'package:flutter_application_1/services/device_provisioning.dart';
 import 'package:flutter_application_1/services/emergency_relay_service.dart';
+import 'package:flutter_application_1/services/phone_location_relay.dart';
 import 'package:flutter_application_1/services/recording_keep_alive.dart';
 import 'package:flutter_application_1/services/ride_export_service.dart';
 import 'package:flutter_application_1/services/ride_frame_store.dart';
@@ -511,6 +512,29 @@ void main() {
       expect(data.ledManual, isTrue);
     });
 
+    test('uses the firmware-chosen position from "loc" (phone first)', () {
+      final data = BikeData.fromStatusJson({
+        ...status,
+        'gps': {'chars': 900, 'fix': false, 'lat': 0, 'lon': 0, 'speed': 0},
+        'loc': {'src': 'phone', 'valid': true, 'lat': 24.01, 'lon': 121.61, 'speed': 18.2, 'phoneAgeMs': 300},
+      });
+      expect(data.locationSource, 'phone');
+      expect(data.lat, 24.01);
+      expect(data.lng, 121.61);
+      expect(data.speedKmh, 18.2);
+      expect(data.gpsFix, isTrue); // has a usable position
+      expect(data.antennaFix, isFalse); // antenna itself still searching
+    });
+
+    test('loc with no source means no usable position', () {
+      final data = BikeData.fromStatusJson({
+        'gps': {'fix': false},
+        'loc': {'src': 'none', 'valid': false, 'lat': 0, 'lon': 0, 'speed': 0},
+      });
+      expect(data.gpsFix, isFalse);
+      expect(data.locationSource, 'none');
+    });
+
     test('missing objects default numbers to 0 and extras to null', () {
       final data = BikeData.fromStatusJson(const {});
       expect(data.lat, 0);
@@ -889,4 +913,79 @@ void main() {
       expect(await discovery.find(preferred: '192.168.1.1'), isNull);
     });
   });
+
+  group('PhoneLocationRelay', () {
+    test('builds the /api/phoneloc query the firmware parses', () {
+      final uri = PhoneLocationRelay.buildUri(
+        Uri.parse('http://192.168.137.50'),
+        const PhoneFix(lat: 23.9871234, lon: 121.6012345, speedKmh: 12.34, accuracyM: 7.6),
+      );
+      expect(uri.path, '/api/phoneloc');
+      expect(uri.queryParameters, {
+        'lat': '23.987123',
+        'lon': '121.601235',
+        'spd': '12.3',
+        'acc': '8',
+      });
+    });
+
+    test('omits speed/accuracy the phone did not report', () {
+      final uri = PhoneLocationRelay.buildUri(
+        Uri.parse('http://bike-assist.local'),
+        const PhoneFix(lat: 24, lon: 121),
+      );
+      expect(uri.queryParameters.keys, ['lat', 'lon']);
+    });
+
+    test('sends fixes to the device, at most once per interval', () async {
+      final fixes = StreamController<PhoneFix>();
+      final sent = <Uri>[];
+      final relay = PhoneLocationRelay(
+        source: _FakeFixSource(fixes.stream),
+        client: MockClient((r) async {
+          sent.add(r.url);
+          return http.Response('{"ok":true,"src":"phone"}', 200);
+        }),
+        minInterval: const Duration(milliseconds: 300),
+      );
+      await relay.start(Uri.parse('http://192.168.137.50'));
+      fixes.add(const PhoneFix(lat: 24.0, lon: 121.0));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      fixes.add(const PhoneFix(lat: 24.1, lon: 121.1)); // inside interval → dropped
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      fixes.add(const PhoneFix(lat: 24.2, lon: 121.2));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(sent.map((u) => u.queryParameters['lat']), ['24.000000', '24.200000']);
+      expect(relay.state.value, PhoneLocState.active);
+
+      await relay.stop();
+      fixes.add(const PhoneFix(lat: 25, lon: 122)); // after stop → not sent
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(sent, hasLength(2));
+      await relay.dispose();
+      await fixes.close();
+    });
+
+    test('reports why phone location is unavailable', () async {
+      final relay = PhoneLocationRelay(
+        source: _FakeFixSource(const Stream.empty(), problem: '未允許定位權限'),
+        client: MockClient((r) async => http.Response('', 200)),
+      );
+      await relay.start(Uri.parse('http://192.168.137.50'));
+      expect(relay.state.value, PhoneLocState.error);
+      expect(relay.message.value, contains('未允許定位權限'));
+      await relay.dispose();
+    });
+  });
+}
+
+class _FakeFixSource implements PhoneFixSource {
+  _FakeFixSource(this._stream, {this.problem});
+  final Stream<PhoneFix> _stream;
+  final String? problem;
+  @override
+  Future<String?> prepare() async => problem;
+  @override
+  Stream<PhoneFix> fixes() => _stream;
 }

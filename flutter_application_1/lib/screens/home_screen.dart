@@ -10,6 +10,7 @@ import '../services/camera_source.dart';
 import '../services/device_control.dart';
 import '../services/device_discovery.dart';
 import '../services/device_provisioning.dart';
+import '../services/phone_location_relay.dart';
 import '../services/emergency_relay_service.dart';
 import '../services/emergency_settings.dart';
 import '../services/ride_frame_store.dart';
@@ -88,6 +89,10 @@ class _HomeScreenState extends State<HomeScreen> {
   /// The host was saved as "last used" once telemetry proved it's the device.
   bool _hostSaved = false;
 
+  /// Sends this phone's location to the bike while connected, so the bike
+  /// uses it instead of its GPS antenna (which takes over on disconnect).
+  final PhoneLocationRelay _locationRelay = PhoneLocationRelay();
+
   // ── Live state derived from telemetry ──────────────────────────────────
   String? _lastAccelEvent;
   bool _commandBusy = false;
@@ -114,6 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _discovery?.cancel();
     _discovery?.dispose();
+    _locationRelay.dispose();
     widget.dataSource.mode.removeListener(_onTelemetryMode);
     _eventSubscription?.cancel();
     _cameraSubscription?.cancel();
@@ -171,6 +177,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onTelemetryMode() {
     final base = _deviceBase;
+    if (widget.dataSource.mode.value == TelemetryMode.connected && base != null) {
+      _locationRelay.start(base); // no-op if already relaying to this device
+    }
     if (widget.dataSource.mode.value == TelemetryMode.connected &&
         base != null &&
         !_hostSaved) {
@@ -187,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// stops via the connection listener in main.
   void _disconnect() {
     _deviceBase = null;
+    _locationRelay.stop();
     _lastAccelEvent = null;
     widget.cameraSource.disconnect();
     widget.dataSource.disconnect();
@@ -463,7 +473,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 12),
               _AttitudePanel(data: data),
               const SizedBox(height: 12),
-              _SystemPanel(data: data),
+              _SystemPanel(data: data, relay: _locationRelay),
             ],
           ],
         );
@@ -635,11 +645,15 @@ class _SpeedPanel extends StatelessWidget {
     final theme = Theme.of(context);
     final fix = data.gpsFix == true;
     final chars = data.gpsChars ?? 0;
-    final (gpsColor, gpsLabel) = fix
-        ? (SwColors.green, 'GPS 已定位')
-        : chars > 0
+    final (gpsColor, gpsLabel) = !fix
+        ? (chars > 0
             ? (SwColors.amber, 'GPS 搜尋中')
-            : (SwColors.red, 'GPS 無訊號');
+            : (SwColors.red, 'GPS 無訊號'))
+        : switch (data.locationSource) {
+            'phone' => (SwColors.green, '手機定位'),
+            'gps' => (SwColors.green, 'GPS 天線定位'),
+            _ => (SwColors.green, 'GPS 已定位'),
+          };
     return Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -818,9 +832,10 @@ class _Tile extends StatelessWidget {
 }
 
 class _SystemPanel extends StatelessWidget {
-  const _SystemPanel({required this.data});
+  const _SystemPanel({required this.data, required this.relay});
 
   final BikeData data;
+  final PhoneLocationRelay relay;
 
   @override
   Widget build(BuildContext context) {
@@ -863,6 +878,29 @@ class _SystemPanel extends StatelessWidget {
           row('WiFi', Text(data.deviceIp == null ? wifi : '$wifi · ${data.deviceIp}')),
           const Divider(),
           row('時間來源', Text(data.timeSource ?? '–')),
+          const Divider(),
+          row('定位來源', Text(switch (data.locationSource) {
+            'phone' => '手機',
+            'gps' => 'GPS 天線',
+            'none' => '尚無定位',
+            _ => 'GPS 天線',
+          })),
+          const Divider(),
+          row('GPS 天線', Text(data.antennaFix != true
+              ? '搜尋中'
+              : data.locationSource == 'phone'
+                  ? '已定位(備援待命)'
+                  : '已定位(使用中)')),
+          ValueListenableBuilder<String?>(
+            valueListenable: relay.message,
+            builder: (context, message, _) => message == null
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(message,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: SwColors.amber)),
+                  ),
+          ),
         ],
       ),
     );

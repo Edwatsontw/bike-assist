@@ -8,7 +8,8 @@
 ///  "gps":{"chars":1234,"fix":true,"lat":23.99,"lon":121.60,"speed":12.5},
 ///  "time":{"now":"...","source":"gps"},
 ///  "sd":{"ok":true},"camera":true,"night":false,
-///  "led":"left","hazard":false}
+///  "led":"left","hazard":false,
+///  "loc":{"src":"phone","valid":true,"lat":23.99,"lon":121.60,"speed":12.5,"phoneAgeMs":420}}
 /// ```
 class BikeData {
   final double lat;
@@ -64,6 +65,14 @@ class BikeData {
   /// Where the device clock came from (e.g. `gps`, `ntp`, `none`).
   final String? timeSource;
 
+  /// Which position the firmware is using: `phone` (relayed from this app),
+  /// `gps` (its own antenna) or `none`. Null on firmware without the `loc`
+  /// object, in which case [lat]/[lng]/[speedKmh] come straight from the GPS.
+  final String? locationSource;
+
+  /// The GPS antenna's own fix state, independent of [locationSource].
+  final bool? antennaFix;
+
   const BikeData({
     required this.lat,
     required this.lng,
@@ -85,6 +94,8 @@ class BikeData {
     this.wifiMode,
     this.deviceIp,
     this.timeSource,
+    this.locationSource,
+    this.antennaFix,
   });
 
   bool get isBrake => accelEvent == 'BRAKE';
@@ -106,6 +117,7 @@ class BikeData {
     final imu = obj('imu');
     final sd = obj('sd');
     final time = obj('time');
+    final loc = obj('loc');
 
     double num0(dynamic v) => (v as num?)?.toDouble() ?? 0.0;
     double? numOrNull(dynamic v) => (v as num?)?.toDouble();
@@ -123,16 +135,23 @@ class BikeData {
       ledManual = boolOrNull(ledRaw['manual']);
     }
 
+    // v3 (2026-10-01) firmware reports the position it actually uses in `loc`
+    // (phone first, GPS antenna as fallback). Older firmware only has `gps`.
+    final hasLoc = loc.isNotEmpty;
+    final pos = hasLoc ? loc : gps;
+    final antennaFix = boolOrNull(gps['fix']);
+
     return BikeData(
-      lat: num0(gps['lat']),
-      lng: num0(gps['lon']),
-      speedKmh: num0(gps['speed']),
+      lat: num0(pos['lat']),
+      lng: num0(pos['lon']),
+      speedKmh: num0(pos['speed']),
       timestamp: timestamp ?? DateTime.now(),
       accelEvent: strOrNull(accel['event']),
       accelMagnitude: numOrNull(accel['g'] ?? accel['magnitude']),
       ledDirection: ledDirection,
       ledManual: ledManual,
-      gpsFix: boolOrNull(gps['fix']),
+      // "Has a usable position" — from either source when `loc` is present.
+      gpsFix: hasLoc ? boolOrNull(loc['valid']) : antennaFix,
       gpsChars: (gps['chars'] as num?)?.toInt(),
       imuOk: boolOrNull(imu['ok']),
       roll: numOrNull(imu['roll']),
@@ -144,6 +163,8 @@ class BikeData {
       wifiMode: strOrNull(json['wifi']),
       deviceIp: strOrNull(json['ip']),
       timeSource: strOrNull(time['source']),
+      locationSource: strOrNull(loc['src']),
+      antennaFix: antennaFix,
     );
   }
 }
