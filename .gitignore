@@ -1,0 +1,14 @@
+# 密碼與金鑰：只放在自己電腦，不上傳
+firmware-v3/src/secrets.h
+*.tskey
+.env
+
+# PlatformIO / Python 產生的檔案
+.pio/
+__pycache__/
+*.py[cod]
+.venv/
+server/.venv/
+
+# 模型權重太大，另外傳
+inference/model/*.pt

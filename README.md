@@ -6,8 +6,14 @@
 
 | 資料夾 | 內容 |
 |--------|------|
-| [`flutter_application_1/`](flutter_application_1/) | Flutter App:即時儀表板(GPS/IMU/速度)、鏡頭 MJPEG 串流、歷史路線地圖回放、騎乘記錄(sqflite)、裝置 WiFi 設定 |
-| [`firmware/`](firmware/) | ESP32-S3 韌體:OV2640 MJPEG 串流 + SoftAP WiFi 設定(見 [firmware/README.md](firmware/README.md)) |
+| [`flutter_application_1/`](flutter_application_1/) | 手機 APP（SafeWay）：即時儀表板、鏡頭串流、騎乘記錄與回放、匯出、緊急回報、手機定位傳給車機 |
+| [`firmware-v3/`](firmware-v3/) | **目前使用的**車機韌體（ESP32-S3-CAM，PlatformIO）。熱點帳密放 `src/secrets.h`（不進 Git，請由 `secrets.example.h` 複製） |
+| [`server/`](server/) | 系統端（FastAPI）＋展示用資料庫與影像。Windows 雙擊 `start_server.bat` 即可啟動 |
+| [`inference/`](inference/) | YOLO 偵測 worker（需 NVIDIA GPU＋Docker；模型權重 `best.pt` 不在 repo 內） |
+| [`docs/展場/`](docs/展場/) | **展場操作 SOP**、Tailscale 遠端連線設定 |
+| [`firmware/`](firmware/) | 早期韌體（camtest，保留參考） |
+
+APK 下載：[Releases → SafeWay 最新測試版](https://github.com/Edwatsontw/bike-assist/releases/tag/safeway-latest)
 
 ## App 快速開始
 

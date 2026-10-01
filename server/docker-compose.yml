@@ -1,0 +1,60 @@
+# bike-assist v3 伺服器 + GPU 偵測 worker
+# 2026-07-20：web(8000) + inference(GPU) 兩服務。web 收上傳/存DB/出UI，
+# inference 吃 GPU 跑 YOLO，兩者用 compose 內部網路以服務名互連（http://bike-server:8000）。
+#
+# 前置（GPU）：主機需裝 NVIDIA 驅動 + nvidia-container-toolkit，
+#   Windows 則 Docker Desktop 開啟 WSL2 + NVIDIA GPU 支援。
+# 模型：把你要用的權重複製到  server/../inference/model/best.pt  （已 gitignore）
+#   例：copy ..\ml\runs\safeway_v3_pothole_dog_640-3\weights\best.pt ..\inference\model\best.pt
+#
+# 啟動： docker compose up -d --build
+# 只跑 web（先不 GPU）： docker compose up -d --build bike-server
+services:
+  bike-server:
+    build: .
+    container_name: bike-assist-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - DB_PATH=/app/data/bike_data.db
+      - UPLOAD_DIR=/app/uploads
+      - TZ=Asia/Taipei
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  inference:
+    build:
+      context: ../inference
+      dockerfile: Dockerfile.gpu
+    container_name: bike-assist-inference
+    depends_on:
+      - bike-server
+    volumes:
+      - ../inference/model:/model:ro      # 放 best.pt 進去 → /model/best.pt
+    environment:
+      - SERVER_URL=http://bike-server:8000
+      - MODEL_PATH=/model/best.pt
+      - DEVICE=cuda:0
+      - CONF=0.25
+      - POLL_SEC=5
+      - BATCH=16
+      - KEEP_CLASSES=pothole,dog   # 只標記坑洞+流浪狗（2026-07-21 需求；未來加 cat）
+      - TZ=Asia/Taipei
+      - PYTHONUNBUFFERED=1   # 讓 worker 的 print log 即時顯示（否則被緩衝看不到）
+    restart: unless-stopped
+    # ── GPU passthrough（需 nvidia-container-toolkit）──
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

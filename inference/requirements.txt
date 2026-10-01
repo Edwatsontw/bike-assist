@@ -1,0 +1,5 @@
+# worker 相依。torch/torchvision 由 GPU base image 內建（見 Dockerfile.gpu），
+# 這裡只列其餘。ultralytics 會自動帶入相容的其他套件。
+ultralytics
+requests
+pillow

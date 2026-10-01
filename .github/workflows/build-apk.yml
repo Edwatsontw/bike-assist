@@ -3,6 +3,9 @@ name: Build SafeWay APK
 on:
   push:
     branches: [safeway-final]
+    paths:   # 只有 APP 改動才重新打包
+      - 'flutter_application_1/**'
+      - '.github/workflows/build-apk.yml'
   workflow_dispatch:
 
 permissions:

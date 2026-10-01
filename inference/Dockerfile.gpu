@@ -1,0 +1,32 @@
+# bike-assist v3 偵測 worker（GPU 版，cu128 for RTX 50 系 / Blackwell sm_120）
+#
+# 2026-07-20：原本用 pytorch/pytorch:2.5.1-cuda12.4 官方映像，但它的 torch 只支援
+# 到 sm_90，RTX 5070（sm_120）不相容（報 "sm_120 is not compatible"）。
+# 改用與「訓練時證實可行」相同的做法：乾淨 python 映像 + pip 裝 cu128 torch。
+# cu128 的 torch wheel 自帶 CUDA 函式庫、支援 Blackwell，不需要 CUDA base 映像；
+# 執行時 GPU 由主機驅動 + nvidia-container-toolkit 提供（見 compose 的 inference 服務）。
+#
+# 代價：cu128 torch wheel 很大（下載約 3GB+），首次 build 較久。
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# ultralytics/opencv 的系統相依
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+
+# 先裝 cu128 版 torch/torchvision（支援 sm_120）
+RUN pip install --no-cache-dir torch torchvision \
+    --index-url https://download.pytorch.org/whl/cu128
+
+# 再裝 worker 其餘相依（ultralytics 會沿用已裝好的 torch，不會覆蓋成 CPU 版）
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY worker.py .
+
+# Ultralytics 設定目錄可寫（避免 warning）
+ENV YOLO_CONFIG_DIR=/tmp/Ultralytics
+
+# 模型權重由 compose 掛進 /model/best.pt；影像走 HTTP 取，不需掛 uploads
+CMD ["python", "worker.py"]

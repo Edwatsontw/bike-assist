@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SafeWay 系統端</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{
+    --ink:#0f1722; --muted:#5b6b7c; --line:#e3e8ee;
+    --page:#f4f6f9; --card:#ffffff;
+    --amber:#f5a300; --red:#e5484d; --green:#1f9d63; --blue:#2f6fde;
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --ink:#e8edf3; --muted:#8b98a7; --line:#26313d; --page:#0d131a; --card:#151d26; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:-apple-system,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;
+    background:var(--page);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased;
+    display:flex;flex-direction:column}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ── Top bar ── */
+  header{background:var(--card);border-bottom:1px solid var(--line);flex-shrink:0}
+  .bar{display:flex;align-items:center;gap:20px;padding:0 24px;height:60px}
+  .brand{font-weight:800;font-size:1.1rem;letter-spacing:-.02em;white-space:nowrap}
+  .brand small{font-weight:600;color:var(--muted);font-size:.8rem;margin-left:6px}
+  nav{display:flex;gap:4px;height:100%}
+  nav button{font:inherit;font-weight:700;font-size:.92rem;background:none;border:0;color:var(--muted);
+    padding:0 14px;cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px}
+  nav button.active{color:var(--ink);border-bottom-color:var(--ink)}
+  .pill{min-width:20px;height:20px;padding:0 6px;border-radius:999px;font-size:.72rem;color:#fff;
+    display:none;align-items:center;justify-content:center;background:var(--amber)}
+  .status{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--muted);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+  .dot.on{background:var(--green)} .dot.stale{background:var(--amber)} .dot.off{background:var(--red)}
+
+  .alert{display:none;align-items:center;gap:12px;background:var(--red);color:#fff;padding:10px 24px;font-weight:700}
+  .alert.show{display:flex}
+  .alert button{margin-left:auto;font:inherit;font-weight:700;background:#fff;color:var(--red);
+    border:0;border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+
+  main{flex:1;min-height:0;display:flex}
+  .page{display:none;flex:1;min-height:0;padding:20px 24px;gap:16px}
+  .page.active{display:flex}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
+  .label{font-size:.72rem;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+
+  /* ── Dashboard ── */
+  #page-dash{flex-direction:column;overflow:auto}
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  .kpi{padding:14px 16px}
+  .kpi .v{font-size:1.9rem;font-weight:800;line-height:1.15;margin-top:4px}
+  .kpi .u{font-size:.8rem;color:var(--muted);font-weight:600;margin-left:3px}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:800;font-size:1rem;margin-top:6px}
+  .b-NORMAL{background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green)}
+  .b-BRAKE{background:color-mix(in srgb,var(--amber) 16%,transparent);color:var(--amber)}
+  .b-COLLISION{background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--red)}
+  .dash-mid{display:grid;grid-template-columns:1fr 340px;gap:16px;min-height:360px;flex:1}
+  #map{border-radius:var(--radius);border:1px solid var(--line);min-height:360px}
+  .side{padding:16px;display:flex;flex-direction:column;gap:6px}
+  .row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:.92rem}
+  .row:last-child{border-bottom:0}
+  .row span:last-child{font-weight:700}
+  .tbl{overflow:auto}
+  table{width:100%;border-collapse:collapse;font-size:.88rem}
+  th{position:sticky;top:0;background:var(--card);text-align:left;font-size:.72rem;letter-spacing:.06em;
+    color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line)}
+  td{padding:8px 14px;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:0}
+  .tbl-head{padding:14px 16px 4px}
+  .ev{font-weight:800}
+  .ev-BRAKE{color:var(--amber)} .ev-COLLISION{color:var(--red)} .ev-NORMAL{color:var(--muted)}
+
+  /* ── Maps pages ── */
+  #page-detect,#page-fallen{padding:0;gap:0}
+  .mapwrap{flex:1;position:relative;min-width:0}
+  .mapwrap > div.leaflet-container{position:absolute;inset:0}
+  .float{position:absolute;top:16px;left:16px;z-index:500;padding:10px 12px;display:flex;flex-wrap:wrap;gap:8px;max-width:calc(100% - 32px)}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);
+    background:var(--card);font-size:.85rem;font-weight:700;cursor:pointer;user-select:none}
+  .chip.off{opacity:.4}
+  .chip i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .chip b{color:var(--muted);font-weight:700}
+  .panel{width:340px;flex-shrink:0;background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column}
+  .panel-head{padding:18px 18px 12px;border-bottom:1px solid var(--line)}
+  .panel-head h3{font-size:1rem;font-weight:800}
+  .panel-head p{font-size:.82rem;color:var(--muted);margin-top:2px}
+  .list{overflow:auto;flex:1}
+  .item{padding:14px 18px;border-bottom:1px solid var(--line);cursor:pointer}
+  .item:hover{background:var(--page)}
+  .item .t{font-weight:800;font-size:.92rem}
+  .item .m{font-size:.8rem;color:var(--muted);margin-top:2px}
+  .item button{margin-top:8px;font:inherit;font-size:.8rem;font-weight:700;background:var(--ink);color:var(--card);
+    border:0;border-radius:8px;padding:5px 10px;cursor:pointer}
+  .empty{padding:40px 18px;text-align:center;color:var(--muted);font-size:.9rem}
+  .leaflet-popup-content{font-family:inherit;font-size:.85rem}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(229,72,77,.7)}70%{box-shadow:0 0 0 12px rgba(229,72,77,0)}100%{box-shadow:0 0 0 0 rgba(229,72,77,0)}}
+
+  @media (max-width:1000px){
+    .kpis{grid-template-columns:repeat(3,1fr)}
+    .dash-mid{grid-template-columns:1fr}
+    .panel{width:280px}
+  }
+  @media (max-width:700px){
+    .bar{gap:10px;padding:0 12px}
+    .brand small,.status span{display:none}
+    nav button{padding:0 8px}
+    .page{padding:12px}
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    #page-detect,#page-fallen{flex-direction:column}
+    .panel{width:auto;height:40%;border-left:0;border-top:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand">SafeWay<small>系統端</small></div>
+    <nav>
+      <button id="nav-dash" class="active" onclick="showPage('dash')">儀表板</button>
+      <button id="nav-detect" onclick="showPage('detect')">偵測地圖</button>
+      <button id="nav-fallen" onclick="showPage('fallen')">倒車事件<span class="pill" id="fallenBadge"></span></button>
+    </nav>
+    <div class="status"><i class="dot" id="liveDot"></i><span id="liveText">等待車機資料</span></div>
+  </div>
+  <div class="alert" id="emgAlert">
+    <span>⚠ 有 <span id="emgCount">0</span> 件緊急倒車事故(倒地 5 分鐘未扶正)尚未處理</span>
+    <button onclick="showPage('fallen')">查看</button>
+  </div>
+</header>
+
+<main>
+  <!-- ── 儀表板 ── -->
+  <section class="page active" id="page-dash">
+    <div class="kpis">
+      <div class="card kpi"><div class="label">速度</div><div class="v num"><span id="k-speed">–</span><span class="u">km/h</span></div></div>
+      <div class="card kpi"><div class="label">事件</div><span class="badge b-NORMAL" id="k-event">–</span></div>
+      <div class="card kpi"><div class="label">ROLL</div><div class="v num"><span id="k-roll">–</span><span class="u">°</span></div></div>
+      <div class="card kpi"><div class="label">PITCH</div><div class="v num"><span id="k-pitch">–</span><span class="u">°</span></div></div>
+      <div class="card kpi"><div class="label">合成 G</div><div class="v num"><span id="k-g">–</span><span class="u">G</span></div></div>
+    </div>
+
+    <div class="dash-mid">
+      <div id="map"></div>
+      <div class="card side">
+        <div class="label" style="margin-bottom:4px">位置</div>
+        <div class="row"><span>緯度</span><span class="num" id="v-lat">–</span></div>
+        <div class="row"><span>經度</span><span class="num" id="v-lon">–</span></div>
+        <div class="row"><span>最後更新</span><span class="num" id="v-ts">–</span></div>
+        <p style="font-size:.8rem;color:var(--muted);margin-top:auto">車機每 5 秒上傳一次感測資料。地圖上的線是最近 20 筆的移動軌跡。</p>
+      </div>
+    </div>
+
+    <div class="card tbl">
+      <div class="tbl-head label">最近 20 筆紀錄</div>
+      <table>
+        <thead><tr><th>時間</th><th>速度 km/h</th><th>事件</th><th>Roll °</th><th>Pitch °</th><th>緯度</th><th>經度</th></tr></thead>
+        <tbody id="tbody"><tr><td colspan="7" class="empty">等待車機資料…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── 偵測地圖 ── -->
+  <section class="page" id="page-detect">
+    <div class="mapwrap">
+      <div id="detectMap"></div>
+      <div class="card float" id="clsChips"></div>
+    </div>
+  </section>
+
+  <!-- ── 倒車事件 ── -->
+  <section class="page" id="page-fallen">
+    <div class="mapwrap"><div id="fallenMap"></div></div>
+    <aside class="panel">
+      <div class="panel-head">
+        <h3>未處理的倒車事件</h3>
+        <p>共 <b id="fallenCount">0</b> 件 · 每 15 秒自動更新</p>
+      </div>
+      <div class="list" id="fallenList"><div class="empty">目前沒有未處理的倒車事件</div></div>
+    </aside>
+  </section>
+</main>
+
+<script>
+// ── 共用 ──────────────────────────────────────────
+const TILE = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const ATTR = '© OpenStreetMap';
+const HUALIEN = [23.99, 121.60];
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => (v == null || isNaN(v)) ? '–' : (+v).toFixed(d);
+const hasPos = (lat, lon) => lat && lon && (Math.abs(lat) + Math.abs(lon) > 0.001);
+const EV_LABEL = { NORMAL: '正常', BRAKE: '急煞', COLLISION: '碰撞' };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function makeMap(id, center = HUALIEN, zoom = 13) {
+  const m = L.map(id, { zoomControl: false }).setView(center, zoom);
+  L.control.zoom({ position: 'bottomright' }).addTo(m);
+  L.tileLayer(TILE, { attribution: ATTR }).addTo(m);
+  return m;
+}
+function dotIcon(color, size = 14, pulse = false) {
+  return L.divIcon({
+    className: '', iconAnchor: [size / 2, size / 2],
+    html: `<div style="width:${size}px;height:${size}px;background:${color};border:2px solid #fff;border-radius:50%;
+      box-shadow:0 0 0 3px ${color}40${pulse ? ';animation:pulse 1s infinite' : ''}"></div>`
+  });
+}
+
+// ── 分頁 ──────────────────────────────────────────
+const maps = {};
+function showPage(id) {
+  ['dash', 'detect', 'fallen'].forEach(k => {
+    $('page-' + k).classList.toggle('active', k === id);
+    $('nav-' + k).classList.toggle('active', k === id);
+  });
+  setTimeout(() => {
+    if (id === 'dash') maps.dash.invalidateSize();
+    if (id === 'detect') { maps.detect ??= initDetectMap(); maps.detect.invalidateSize(); loadDetections(true); }
+    if (id === 'fallen') { maps.fallen ??= makeMap('fallenMap'); maps.fallen.invalidateSize(); }
+    loadFallen(id === 'fallen');   // 也同步紅色警示條（在倒車頁時隱藏）
+  }, 30);
+}
+
+// ── 儀表板 ────────────────────────────────────────
+maps.dash = makeMap('map', [25.033964, 121.564468], 15);
+let posMarker = null, trail = null, centred = false;
+
+function g(r) {
+  const x = +r.accel_x || 0, y = +r.accel_y || 0, z = +r.accel_z || 0;
+  return Math.sqrt(x * x + y * y + z * z);
+}
+
+// sensor_logs.timestamp 是伺服器本地時間 "YYYY-MM-DD HH:MM:SS"
+function ageSeconds(ts) {
+  if (!ts) return Infinity;
+  const t = new Date(ts.replace(' ', 'T'));
+  return isNaN(t) ? Infinity : (Date.now() - t.getTime()) / 1000;
+}
+
+function setLive(state, text) {
+  $('liveDot').className = 'dot ' + state;
+  $('liveText').textContent = text;
+}
+
+function updateDash(data) {
+  if (!data.length) { setLive('', '尚無車機資料'); return; }
+  const r = data[0];
+  const age = ageSeconds(r.timestamp);
+  if (age < 20) setLive('on', '車機上線 · ' + r.timestamp.slice(11));
+  else setLive('stale', '車機離線 · 最後資料 ' + r.timestamp);
+
+  $('k-speed').textContent = fmt(r.speed);
+  $('k-roll').textContent = fmt(r.roll);
+  $('k-pitch').textContent = fmt(r.pitch);
+  $('k-g').textContent = fmt(g(r), 2);
+  const ev = r.accel_event || 'NORMAL';
+  $('k-event').textContent = EV_LABEL[ev] || ev;
+  $('k-event').className = 'badge b-' + (EV_LABEL[ev] ? ev : 'NORMAL');
+
+  $('v-lat').textContent = hasPos(r.lat, r.lon) ? (+r.lat).toFixed(6) : '無定位';
+  $('v-lon').textContent = hasPos(r.lat, r.lon) ? (+r.lon).toFixed(6) : '無定位';
+  $('v-ts').textContent = r.timestamp ?? '–';
+
+  const pts = data.filter(d => hasPos(d.lat, d.lon)).map(d => [+d.lat, +d.lon]).reverse();
+  if (pts.length) {
+    const cur = pts[pts.length - 1];
+    if (!posMarker) posMarker = L.marker(cur, { icon: dotIcon('#2f6fde', 16) }).addTo(maps.dash);
+    else posMarker.setLatLng(cur);
+    if (!trail) trail = L.polyline(pts, { color: '#2f6fde', weight: 4, opacity: .6 }).addTo(maps.dash);
+    else trail.setLatLngs(pts);
+    if (!centred) {
+      if (pts.length > 1) maps.dash.fitBounds(pts, { maxZoom: 17, padding: [40, 40] });
+      else maps.dash.setView(cur, 16);
+      centred = true;
+    }
+  }
+
+  $('tbody').innerHTML = data.map(row => {
+    const e = row.accel_event || 'NORMAL';
+    return `<tr>
+      <td class="num">${esc(row.timestamp)}</td>
+      <td class="num">${fmt(row.speed)}</td>
+      <td class="ev ev-${EV_LABEL[e] ? e : 'NORMAL'}">${esc(EV_LABEL[e] || e)}</td>
+      <td class="num">${fmt(row.roll)}</td>
+      <td class="num">${fmt(row.pitch)}</td>
+      <td class="num">${hasPos(row.lat, row.lon) ? (+row.lat).toFixed(5) : '–'}</td>
+      <td class="num">${hasPos(row.lat, row.lon) ? (+row.lon).toFixed(5) : '–'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function pollDash() {
+  try {
+    const res = await fetch('/api/data?limit=20');
+    if (!res.ok) throw new Error();
+    updateDash(await res.json());
+  } catch {
+    setLive('off', '伺服器無回應');
+  }
+}
+
+// ── 偵測地圖 ──────────────────────────────────────
+const CLS = {
+  pothole:    { label: '坑洞',   color: '#f5a300' },
+  dog:        { label: '流浪狗', color: '#e5484d' },
+  motorcycle: { label: '機車',   color: '#8b5cf6' },
+  car:        { label: '轎車',   color: '#2f6fde' },
+  bicycle:    { label: '腳踏車', color: '#1f9d63' },
+};
+const clsOn = Object.fromEntries(Object.keys(CLS).map(c => [c, true]));
+const detLayers = {};
+
+function initDetectMap() {
+  const m = makeMap('detectMap');
+  Object.keys(CLS).forEach(c => detLayers[c] = L.layerGroup().addTo(m));
+  return m;
+}
+
+function renderChips(summary) {
+  $('clsChips').innerHTML = Object.keys(CLS).map(c => `
+    <span class="chip ${clsOn[c] ? '' : 'off'}" onclick="toggleCls('${c}')">
+      <i style="background:${CLS[c].color}"></i>${CLS[c].label}<b>${summary[c] || 0}</b>
+    </span>`).join('');
+}
+
+let lastSummary = {};
+function toggleCls(c) {
+  clsOn[c] = !clsOn[c];
+  if (clsOn[c]) maps.detect.addLayer(detLayers[c]); else maps.detect.removeLayer(detLayers[c]);
+  renderChips(lastSummary);
+}
+
+async function loadDetections(fit) {
+  let dets = [];
+  try {
+    lastSummary = await (await fetch('/api/detections/summary')).json();
+    dets = await (await fetch('/api/detections?limit=5000')).json();
+  } catch { return; }
+  renderChips(lastSummary);
+  Object.values(detLayers).forEach(l => l.clearLayers());
+  const pts = [];
+  dets.forEach(d => {
+    const meta = CLS[d.cls];
+    if (!meta || !hasPos(d.lat, d.lon)) return;
+    L.circleMarker([d.lat, d.lon], { radius: 7, color: '#fff', weight: 2, fillColor: meta.color, fillOpacity: .95 })
+      .bindPopup(`<b>${meta.label}</b> · 信心 ${(d.conf * 100).toFixed(0)}%<br>${esc(d.cap_time || '')}<br>`
+        + `${(+d.lat).toFixed(5)}, ${(+d.lon).toFixed(5)}`
+        + `<br><img src="/api/uploads/${encodeURIComponent(d.filename)}" style="width:200px;margin-top:6px;border-radius:8px" onerror="this.remove()">`)
+      .addTo(detLayers[d.cls]);
+    if (clsOn[d.cls]) pts.push([d.lat, d.lon]);
+  });
+  if (fit && pts.length) maps.detect.fitBounds(pts, { maxZoom: 16, padding: [60, 60] });
+}
+
+// ── 倒車事件 ──────────────────────────────────────
+// level: notice = 倒地 10 秒一般通知（橘）／ emergency = 5 分鐘未扶正緊急事故（紅、閃爍）
+let fallenMarkers = [];
+
+async function resolveFallen(id) {
+  await fetch('/api/fallen/' + id + '/resolve', { method: 'POST' });
+  loadFallen(false);
+}
+function focusFallen(lat, lon) {
+  if (maps.fallen && hasPos(lat, lon)) maps.fallen.setView([lat, lon], 17);
+}
+
+async function loadFallen(fit) {
+  let d = [];
+  try { d = await (await fetch('/api/fallen?only_unresolved=true')).json(); } catch { return; }
+
+  const emg = d.filter(e => e.level === 'emergency').length;
+  const badge = $('fallenBadge');
+  badge.textContent = d.length;
+  badge.style.display = d.length ? 'inline-flex' : 'none';
+  badge.style.background = emg ? 'var(--red)' : 'var(--amber)';
+  $('emgCount').textContent = emg;
+  $('emgAlert').classList.toggle('show', emg > 0 && !$('page-fallen').classList.contains('active'));
+  $('fallenCount').textContent = d.length;
+
+  if (maps.fallen) { fallenMarkers.forEach(m => maps.fallen.removeLayer(m)); fallenMarkers = []; }
+  if (!d.length) {
+    $('fallenList').innerHTML = '<div class="empty">目前沒有未處理的倒車事件</div>';
+    return;
+  }
+  const pts = [];
+  $('fallenList').innerHTML = d.map(e => {
+    const isEmg = e.level === 'emergency';
+    const label = isEmg ? '緊急事故' : '倒車通知';
+    const color = isEmg ? '#e5484d' : '#f5a300';
+    const pos = hasPos(e.lat, e.lon);
+    if (pos && maps.fallen) {
+      fallenMarkers.push(L.marker([e.lat, e.lon], { icon: dotIcon(color, isEmg ? 18 : 15, isEmg) })
+        .addTo(maps.fallen)
+        .bindPopup(`<b style="color:${color}">${label}</b> #${e.id}<br>${esc(e.timestamp)}<br>${(+e.lat).toFixed(5)}, ${(+e.lon).toFixed(5)}`));
+      pts.push([e.lat, e.lon]);
+    }
+    return `<div class="item" onclick="focusFallen(${+e.lat || 0},${+e.lon || 0})">
+      <div class="t" style="color:${color}">${label} #${e.id}</div>
+      <div class="m num">${esc(e.timestamp ?? '–')}</div>
+      <div class="m num">${pos ? (+e.lat).toFixed(5) + ', ' + (+e.lon).toFixed(5) : '裝置當時沒有 GPS 定位'}</div>
+      <button onclick="event.stopPropagation();resolveFallen(${e.id})">標記已扶正</button>
+    </div>`;
+  }).join('');
+  if (fit && pts.length && maps.fallen) maps.fallen.fitBounds(pts, { maxZoom: 16, padding: [60, 60] });
+}
+
+// ── 啟動 ──────────────────────────────────────────
+pollDash();
+setInterval(pollDash, 2000);
+loadFallen(false);
+setInterval(() => loadFallen(false), 15000);
+</script>
+</body>
+</html>
