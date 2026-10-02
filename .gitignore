@@ -10,5 +10,10 @@ __pycache__/
 .venv/
 server/.venv/
 
-# 模型權重太大，另外傳
-inference/model/*.pt
+# 訓練資料與輸出（太大，留在原開發電腦）
+ml/datasets/
+ml/raw_downloads/
+ml/runs/
+ml/*.pt
+*.kicad_pcb.bak
+*.kicad_prl

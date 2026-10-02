@@ -1,0 +1,21 @@
+# bike-assist v3 YOLO dataset config
+# 5 類別：路面坑洞 / 流浪狗 / 機車 / 轎車 / 腳踏車
+# 合併來源（2026-07-20）：
+#   pothole    ← v2 Intel Unnati + Road-damage(pothole系) + indian-road-potholes
+#   dog        ← Stray Animal Detection(dog) + COCO(dog)
+#   motorcycle ← COCO(motorcycle)  ← 2026-07-20 新增
+#   car        ← COCO(car)         ← 2026-07-20 新增
+#   bicycle    ← COCO(bicycle)     ← 2026-07-20 新增
+# 詳見 docs/每日進度/ 的資料集相關文件、ml/download_*.py
+
+path: C:/Users/Edwatson/Desktop/BIKEEEE/bike-assist-v3/ml/datasets
+train: images/train
+val: images/val
+
+nc: 5
+names:
+  0: pothole
+  1: dog
+  2: motorcycle
+  3: car
+  4: bicycle

@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "author": "bike-assist",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp32",
+      "top": -153.78,
+      "left": 484.57,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-mpu6050",
+      "id": "imu1",
+      "top": 100,
+      "left": 350,
+      "attrs": { "label": "MPU6050 IMU" }
+    },
+    { "type": "wokwi-breadboard", "id": "bb1", "top": 180, "left": 20, "attrs": {} },
+    {
+      "type": "wokwi-led",
+      "id": "ledL",
+      "top": 200,
+      "left": 550,
+      "attrs": { "color": "orange", "label": "LEFT Blinker" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "resL",
+      "top": 240,
+      "left": 550,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "ledR",
+      "top": 200,
+      "left": 650,
+      "attrs": { "color": "orange", "label": "RIGHT Blinker" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "resR",
+      "top": 240,
+      "left": 650,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer1",
+      "top": 250,
+      "left": 350,
+      "attrs": { "label": "Audio/Buzzer" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "ledWarning",
+      "top": 300,
+      "left": 550,
+      "attrs": { "color": "red", "label": "WARNING Light" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "resWarning",
+      "top": 340,
+      "left": 550,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 350,
+      "left": 150,
+      "attrs": { "label": "Record Button" }
+    },
+    {
+      "type": "wokwi-sd-card",
+      "id": "sdcard1",
+      "top": 100,
+      "left": 150,
+      "attrs": { "label": "SD Card" }
+    },
+    {
+      "type": "wokwi-ov7670",
+      "id": "camera1",
+      "top": 350,
+      "left": 350,
+      "attrs": { "label": "OV2640 Camera" }
+    },
+    {
+      "type": "wokwi-gps-module",
+      "id": "gps1",
+      "top": 400,
+      "left": 150,
+      "attrs": { "label": "GPS Module" }
+    }
+  ],
+  "connections": [
+    [ "esp32:GPIO4", "imu1:SDA", "green", [] ],
+    [ "esp32:GPIO22", "imu1:SCL", "blue", [] ],
+    [ "esp32:3V3", "imu1:VCC", "red", [] ],
+    [ "esp32:GND.1", "imu1:GND", "black", [] ],
+    [ "esp32:GPIO5", "resL:1", "orange", [] ],
+    [ "resL:2", "ledL:A", "orange", [] ],
+    [ "ledL:K", "esp32:GND.2", "black", [] ],
+    [ "esp32:GPIO6", "resR:1", "yellow", [] ],
+    [ "resR:2", "ledR:A", "yellow", [] ],
+    [ "ledR:K", "esp32:GND.3", "black", [] ],
+    [ "esp32:GPIO42", "buzzer1:+", "purple", [] ],
+    [ "buzzer1:-", "esp32:GND.4", "black", [] ],
+    [ "esp32:GPIO12", "resWarning:1", "red", [] ],
+    [ "resWarning:2", "ledWarning:A", "red", [] ],
+    [ "ledWarning:K", "esp32:GND.5", "black", [] ],
+    [ "esp32:GPIO11", "btn1:1", "brown", [] ],
+    [ "esp32:GND.6", "btn1:2", "black", [] ],
+    [ "esp32:GPIO23", "sdcard1:MOSI", "purple", [] ],
+    [ "esp32:GPIO19", "sdcard1:MISO", "purple", [] ],
+    [ "esp32:GPIO20", "sdcard1:CLK", "purple", [] ],
+    [ "esp32:GPIO21", "sdcard1:CS", "purple", [] ],
+    [ "esp32:3V3", "sdcard1:VCC", "red", [] ],
+    [ "esp32:GND.7", "sdcard1:GND", "black", [] ],
+    [ "esp32:GPIO15", "camera1:XCLK", "cyan", [] ],
+    [ "esp32:GPIO16", "camera1:D7", "cyan", [] ],
+    [ "esp32:GPIO17", "camera1:D6", "cyan", [] ],
+    [ "esp32:GPIO18", "camera1:D5", "cyan", [] ],
+    [ "esp32:GPIO3", "camera1:D4", "cyan", [] ],
+    [ "esp32:GPIO46", "camera1:D3", "cyan", [] ],
+    [ "esp32:GPIO2", "camera1:D2", "cyan", [] ],
+    [ "esp32:GPIO1", "camera1:D1", "cyan", [] ],
+    [ "esp32:GPIO14", "camera1:D0", "cyan", [] ],
+    [ "esp32:GPIO7", "camera1:VSYNC", "cyan", [] ],
+    [ "esp32:GPIO47", "camera1:HREF", "cyan", [] ],
+    [ "esp32:GPIO13", "camera1:PCLK", "cyan", [] ],
+    [ "esp32:GPIO4", "camera1:SIOD", "cyan", [] ],
+    [ "esp32:GPIO22", "camera1:SIOC", "cyan", [] ],
+    [ "esp32:3V3", "camera1:VCC", "red", [] ],
+    [ "esp32:GND.8", "camera1:GND", "black", [] ],
+    [ "esp32:GPIO44", "gps1:TX", "green", [] ],
+    [ "esp32:GPIO43", "gps1:RX", "blue", [] ],
+    [ "esp32:3V3", "gps1:VCC", "red", [] ],
+    [ "esp32:GND.9", "gps1:GND", "black", [] ],
+    [ "ledL:A", "bb1:56t.b", "", [ "$bb" ] ],
+    [ "ledL:C", "bb1:55t.b", "", [ "$bb" ] ]
+  ],
+  "dependencies": {}
+}
