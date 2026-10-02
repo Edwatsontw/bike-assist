@@ -27,6 +27,9 @@
   header{background:var(--card);border-bottom:1px solid var(--line);flex-shrink:0}
   .bar{display:flex;align-items:center;gap:20px;padding:0 24px;height:60px}
   .brand{font-weight:800;font-size:1.1rem;letter-spacing:-.02em;white-space:nowrap}
+  .demo{display:none;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:.72rem;font-weight:800;
+    background:var(--amber);color:#fff;vertical-align:middle}
+  .demo.show{display:inline-block}
   .brand small{font-weight:600;color:var(--muted);font-size:.8rem;margin-left:6px}
   nav{display:flex;gap:4px;height:100%}
   nav button{font:inherit;font-weight:700;font-size:.92rem;background:none;border:0;color:var(--muted);
@@ -121,7 +124,7 @@
 
 <header>
   <div class="bar">
-    <div class="brand">SafeWay<small>系統端</small></div>
+    <div class="brand">SafeWay<small>系統端</small><span class="demo" id="demoTag">模擬資料</span></div>
     <nav>
       <button id="nav-dash" class="active" onclick="showPage('dash')">儀表板</button>
       <button id="nav-detect" onclick="showPage('detect')">偵測地圖</button>
@@ -295,6 +298,13 @@ function updateDash(data) {
   }).join('');
 }
 
+async function pollDemo() {
+  try {
+    const h = await (await fetch('/api/health')).json();
+    $('demoTag').classList.toggle('show', !!h.demo);
+  } catch {}
+}
+
 async function pollDash() {
   try {
     const res = await fetch('/api/data?limit=20');
@@ -413,6 +423,8 @@ async function loadFallen(fit) {
 // ── 啟動 ──────────────────────────────────────────
 pollDash();
 setInterval(pollDash, 2000);
+pollDemo();
+setInterval(pollDemo, 5000);
 loadFallen(false);
 setInterval(() => loadFallen(false), 15000);
 </script>

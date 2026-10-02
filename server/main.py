@@ -30,9 +30,19 @@ app = FastAPI(title="Bike Sensor Server", lifespan=lifespan)
 def dashboard():
     return FileResponse(TEMPLATES / "index.html")
 
+# 2026-10-02：模擬車機（fake_bike.py）每 5 秒打一次 /api/demo，
+# 網頁據此顯示「模擬資料」標籤，避免把模擬畫面誤當實測。
+_demo_seen: float = 0.0
+
+@app.post("/api/demo")
+def demo_ping():
+    global _demo_seen
+    _demo_seen = time.time()
+    return {"ok": True}
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "demo": time.time() - _demo_seen < 15}
 
 @app.post("/api/data")
 def receive(payload: SensorPayload):
