@@ -318,7 +318,7 @@ void saveCreds(const String& ssid, const String& pass) {
 //   NEO-6M 只接 RX、電源常開，韌體無法讓它關機；所以 GPS 仍在背景持續解析、保持定位，
 //   切回 GPS 時不必重新冷啟動搜星（冷啟動要 30 秒以上，倒車時剛好沒座標就糟了）。
 #define PHONE_LOC_STALE_MS   5000UL   // 手機座標超過 5 秒沒更新 → 視為斷線，改用 GPS
-#define PHONE_LOC_MAX_ACC_M  100.0f   // 手機回報精度差於 100 m（室內只靠基地台）就不採用
+#define PHONE_LOC_MAX_ACC_M  100.0f   // 手機精度差於 100 m（室內只靠基地台）時，天線有定位就先用天線
 
 struct PhoneLoc {
     double lat; double lon;
@@ -340,9 +340,19 @@ bool phoneLocFresh() {
     return phoneLoc.has && (millis() - phoneLoc.at) < PHONE_LOC_STALE_MS;
 }
 
-// 目前要用的位置：手機（新鮮）→ GPS 天線（有定位）→ 無
+// 手機精度是否夠好（沒回報精度視為夠好）
+bool phoneLocAccurate() {
+    return phoneLoc.accM < 0 || phoneLoc.accM <= PHONE_LOC_MAX_ACC_M;
+}
+
+// 目前要用的位置：
+//   1. 手機（新鮮且精度夠好）
+//   2. GPS 天線（有定位）
+//   3. 手機（新鮮但精度差）——天線沒接／沒定位時，有總比沒有好（2026-10-02）
+//   4. 無
 Position currentPosition() {
-    if (phoneLocFresh()) {
+    bool phoneUsable = phoneLocFresh() && (phoneLocAccurate() || !gps.isLocationValid());
+    if (phoneUsable) {
         float spd = phoneLoc.speedKmh >= 0 ? phoneLoc.speedKmh
                   : (gps.isLocationValid() ? (float)gps.getSpeed() : 0.0f);
         Position p = { true, phoneLoc.lat, phoneLoc.lon, spd, "phone" };
@@ -407,16 +417,15 @@ esp_err_t phoneLocHandler(httpd_req_t* req) {
         return ESP_FAIL;
     }
     httpd_resp_set_type(req, "application/json");
-    if (acc > PHONE_LOC_MAX_ACC_M) {
-        // 精度太差就不採用，讓 GPS 天線繼續負責（不更新 at，舊的手機座標會自然過期）
-        return httpd_resp_send(req, "{\"ok\":false,\"reason\":\"low_accuracy\"}", HTTPD_RESP_USE_STRLEN);
-    }
     phoneLoc.lat = lat;
     phoneLoc.lon = lon;
     phoneLoc.speedKmh = spd;
     phoneLoc.accM = acc;
     phoneLoc.at = millis();
     phoneLoc.has = true;
+    // 精度差且天線有定位 → 先用天線（回報 low_accuracy 讓 APP 顯示提示）；天線沒定位 → 照用手機
+    if (!phoneLocAccurate() && gps.isLocationValid())
+        return httpd_resp_send(req, "{\"ok\":false,\"reason\":\"low_accuracy\"}", HTTPD_RESP_USE_STRLEN);
     return httpd_resp_send(req, "{\"ok\":true,\"src\":\"phone\"}", HTTPD_RESP_USE_STRLEN);
 }
 
